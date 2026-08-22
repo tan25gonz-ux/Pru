@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistemaaa de Facturación y Cierre - Sucursal</title>
-    <!-- Librería para generar PDF -->
+    <title>Sistema de Facturación y Cierre - Sucursal</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         /* Estilos generales (sin cambios) */
@@ -257,7 +256,7 @@
                     <input type="text" id="cierreMano" readonly style="background:#e2e8f0; font-weight:bold; color:#2e7d32; font-size:18px;">
                 </div>
 
-                <button id="btnEnviarTodo" class="btn-green" onclick="enviarCierreFirebase()">🚀 ENVIAR CIERRE DEL DÍA</button>
+                <button id="btnEnviarTodo" class="btn-green" onclick="enviarTodoFirebase()">🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA</button>
             </div>
         </div>
 
@@ -685,9 +684,7 @@
             }
         };
 
-        // ============================================================
-        // NUEVA VERSIÓN: guarda factura en Firebase inmediatamente
-        // ============================================================
+        // --- FUNCIÓN PARA GUARDAR FACTURA Y SUBIRLA DIRECTAMENTE A FIREBASE ---
         window.guardarFacturaCompletaCliente = async function() {
             const cedula = document.getElementById('cedulaCliente').value.trim();
             const nombre = document.getElementById('nombreCliente').value.trim();
@@ -729,9 +726,15 @@
 
             const firmaData = document.getElementById('firmaDataUrl').value || '';
             const fecha = document.getElementById('fecha').value || new Date().toISOString().split('T')[0];
+            let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
+
+            // Deshabilitar botón para evitar múltiples envíos
+            const btnGuardar = document.querySelector('.btn-save-fact');
+            btnGuardar.disabled = true;
+            btnGuardar.innerText = '⏳ Guardando...';
 
             try {
-                // 1. Guardar cliente en Firestore (colección "clientes")
+                // 1. Guardar o actualizar cliente en Firebase
                 await setDoc(doc(db, "clientes", cedulaLimpia), {
                     nombre: nombre,
                     ultima_actualizacion: serverTimestamp()
@@ -745,52 +748,54 @@
                     ultimoNum = docSnap.data().ultimo_numero || 0;
                 }
                 if (numFacturaInt > ultimoNum) {
-                    await setDoc(docRef, { ultimo_numero: numFacturaInt }, { merge: true });
+                    await setDoc(docRef, {
+                        ultimo_numero: numFacturaInt
+                    }, { merge: true });
                 }
 
-                // 3. Calcular total
-                let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
-
-                // 4. Crear objeto factura
-                const facturaObj = {
+                // 3. Guardar la factura directamente en Firebase (colección facturas_compras)
+                const facturaData = {
                     num_factura: numFactura,
                     cedula: cedulaLimpia,
-                    nombre: nombre,
+                    nombre,
                     detalles_materiales: materialesIngresados,
                     total_factura: totalFactura,
                     firma: firmaData,
                     sucursal: sucursalActual,
                     fecha: fecha,
                     uid_trabajador: uidTrabajador,
-                    timestamp: serverTimestamp()
+                    timestamp: serverTimestamp(),
+                    subida_directa: true,  // Marcar como subida directa (sin cierre)
+                    cierre_id: null
                 };
 
-                // 5. Guardar factura en Firestore (colección "facturas_compras")
-                await addDoc(collection(db, "facturas_compras"), facturaObj);
+                const factRef = await addDoc(collection(db, "facturas_compras"), facturaData);
+                console.log('✅ Factura guardada en Firebase con ID:', factRef.id);
 
-                // 6. También guardar localmente para el resumen del día
+                // 4. Agregar la factura al array local y localStorage
                 facturasDelDia.push({
-                    num_factura: numFactura,
-                    cedula: cedulaLimpia,
-                    nombre,
-                    detalles_materiales: materialesIngresados,
-                    total_factura: totalFactura,
-                    firma: firmaData
+                    ...facturaData,
+                    id: factRef.id  // Guardamos el ID de Firestore para referencia
                 });
-
                 localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
 
-                // 7. Actualizar interfaz y limpiar
+                // 5. Actualizar la tabla local
                 actualizarTablaGeneralDia();
+
+                // 6. Limpiar formulario
                 limpiarFormularioFactura();
                 await obtenerSiguienteNumeroFactura();
-                document.getElementById('cedulaCliente').focus();
 
+                // 7. Mostrar mensaje de éxito
                 alert(`✅ Factura #${numFactura} guardada en Firebase correctamente.`);
 
             } catch (error) {
-                console.error("Error al guardar factura:", error);
-                alert("❌ Ocurrió un error al guardar la factura. Revisa la consola.");
+                console.error('Error al guardar factura:', error);
+                alert('❌ Error al guardar la factura. Intente de nuevo.');
+            } finally {
+                btnGuardar.disabled = false;
+                btnGuardar.innerText = '💾 GUARDAR FACTURA DE CLIENTE';
+                document.getElementById('cedulaCliente').focus();
             }
         };
 
@@ -1104,7 +1109,7 @@
             `;
         }
 
-        // --- NUEVA FUNCIÓN IMPRIMIR (usa el mismo diseño mejorado) ---
+        // --- FUNCIÓN IMPRIMIR (usa el mismo diseño mejorado) ---
         window.imprimirFactura = (index) => {
             const fact = facturasDelDia[index];
             if (!fact) return;
@@ -1137,7 +1142,7 @@
             }
         };
 
-        // --- FUNCIÓN DESCARGAR PDF (también usa el mismo diseño) ---
+        // --- FUNCIÓN DESCARGAR PDF (corregida para evitar blanco) ---
         window.descargarFacturaPDF = (index) => {
             const fact = facturasDelDia[index];
             if (!fact) return;
@@ -1145,53 +1150,60 @@
             const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
             const htmlContenido = generarHTMLFactura(fact, fecha);
 
+            // Crear un contenedor visible pero oculto (opacity 0) para que html2canvas lo renderice
             const tempDiv = document.createElement('div');
-            tempDiv.style.position = 'absolute';
-            tempDiv.style.left = '-9999px';
+            tempDiv.style.position = 'fixed';
             tempDiv.style.top = '0';
-            tempDiv.style.width = '210mm';
+            tempDiv.style.left = '0';
+            tempDiv.style.width = '100%';
+            tempDiv.style.height = '100%';
             tempDiv.style.background = 'white';
-            tempDiv.style.padding = '0';
-            tempDiv.style.zIndex = '9999';
+            tempDiv.style.zIndex = '-1';
+            tempDiv.style.opacity = '0';
+            tempDiv.style.pointerEvents = 'none';
             tempDiv.innerHTML = htmlContenido;
             document.body.appendChild(tempDiv);
 
-            const opt = {
-                margin:        [10, 10, 10, 10],
-                filename:      `Factura_${fact.num_factura}.pdf`,
-                image:         { type: 'jpeg', quality: 0.95 },
-                html2canvas:   { scale: 2, letterRendering: true, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-                jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+            // Esperar un momento para que el DOM se actualice
+            setTimeout(() => {
+                const opt = {
+                    margin:        [10, 10, 10, 10],
+                    filename:      `Factura_${fact.num_factura}.pdf`,
+                    image:         { type: 'jpeg', quality: 0.95 },
+                    html2canvas:   { scale: 2, letterRendering: true, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+                    jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
 
-            html2pdf().set(opt).from(tempDiv).save().then(() => {
-                document.body.removeChild(tempDiv);
-            }).catch((err) => {
-                console.error('Error al generar PDF:', err);
-                document.body.removeChild(tempDiv);
-                alert('Ocurrió un error al generar el PDF. Intente de nuevo.');
-            });
+                html2pdf().set(opt).from(tempDiv).save().then(() => {
+                    document.body.removeChild(tempDiv);
+                }).catch((err) => {
+                    console.error('Error al generar PDF:', err);
+                    document.body.removeChild(tempDiv);
+                    alert('Ocurrió un error al generar el PDF. Intente de nuevo.');
+                });
+            }, 100);
         };
 
-        // --- NUEVA FUNCIÓN DE CIERRE (solo envía el resumen, no las facturas) ---
-        window.enviarCierreFirebase = async function() {
+        // --- ENVÍO DE CIERRE (ahora solo para agrupar, las facturas ya están en Firebase) ---
+        window.enviarTodoFirebase = async function() {
             if (facturasDelDia.length === 0) {
-                alert("❌ No hay facturas registradas hoy para enviar el cierre.");
+                alert("❌ No hay facturas registradas hoy para cerrar.");
                 return;
             }
-            if(!confirm("¿Desea enviar el cierre del día (resumen de caja, gastos y depósitos)?")) return;
+            if(!confirm("¿Desea enviar el cierre total y las facturas al sistema?")) return;
 
             const btn = document.getElementById('btnEnviarTodo');
-            btn.disabled = true; btn.innerText = "Subiendo Cierre...";
+            btn.disabled = true; btn.innerText = "Subiendo Datos...";
 
             const fecha = document.getElementById('fecha').value;
 
             try {
-                // Solo enviamos el resumen del cierre (sin facturas, porque ya están subidas)
-                await addDoc(collection(db, "revisiones_faltantes"), {
+                // Como las facturas ya están en Firebase, solo creamos el documento de cierre
+                const cierreRef = doc(collection(db, "revisiones_faltantes"));
+                await setDoc(cierreRef, {
                     uid_trabajador: uidTrabajador,
                     sucursal: sucursalActual,
-                    fecha: fecha,
+                    fecha,
                     caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
                     total_ventas: obtenerNumeroLimpio('ventas'),
                     total_depositos: obtenerTotalDepositos(),
@@ -1203,18 +1215,18 @@
                     timestamp: serverTimestamp()
                 });
 
-                // Limpiar datos locales (pero las facturas ya están en Firebase)
+                // Limpiar datos locales
                 localStorage.removeItem(`facturas_${sucursalActual}`);
                 localStorage.removeItem(`gastos_${sucursalActual}`);
                 localStorage.removeItem(`depositos_${sucursalActual}`);
                 localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
                 localStorage.removeItem(`ventas_${sucursalActual}`);
 
-                alert("✅ Cierre enviado correctamente.");
+                alert("✅ Cierre guardado con éxito.");
                 location.reload();
             } catch (e) {
-                alert("Error al enviar el cierre: " + e.message);
-                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE DEL DÍA";
+                alert("Error: " + e.message);
+                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA";
             }
         };
 
