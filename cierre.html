@@ -1045,74 +1045,101 @@
             const fact = facturasDelDia[index];
             if (!fact) return;
 
-            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
-            const detalles = fact.detalles_materiales.map(m => 
-                `<tr>
-                    <td style="padding:8px; border-bottom:1px solid #e2e8f0;">${m.material}</td>
-                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; text-align:center;">${m.kilos} kg</td>
-                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; text-align:right;">₡${m.precio_unitario.toLocaleString('es-CR')}</td>
-                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; text-align:right;">₡${m.total_pago.toLocaleString('es-CR')}</td>
-                </tr>`
-            ).join('');
+            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            const hora = new Date().toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' });
+            const sucursalNombre = sucursalActual.toUpperCase();
 
-            const firmaHTML = fact.firma ? 
-                `<div style="text-align:center; margin-top:25px; border-top:1px solid #cbd5e1; padding-top:15px;">
-                    <p style="font-weight:bold; color:#2d3748; margin-bottom:5px;">Firma del Cliente</p>
-                    <img src="${fact.firma}" style="max-width:200px; max-height:80px; border:1px solid #e2e8f0; border-radius:8px; padding:5px; background:white;">
-                </div>` : '';
+            // Generar filas de la tabla con formato mejorado
+            let detallesRows = '';
+            let subtotal = 0;
+            fact.detalles_materiales.forEach((m, i) => {
+                const total = m.kilos * m.precio_unitario;
+                subtotal += total;
+                const bgColor = i % 2 === 0 ? '#f8fafc' : '#ffffff';
+                detallesRows += `
+                    <tr style="background: ${bgColor};">
+                        <td style="padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 500;">${m.material}</td>
+                        <td style="padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: center;">${m.kilos.toFixed(2)} kg</td>
+                        <td style="padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: right;">₡${m.precio_unitario.toLocaleString('es-CR')}</td>
+                        <td style="padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">₡${total.toLocaleString('es-CR')}</td>
+                    </tr>
+                `;
+            });
 
-            // Construir el contenido HTML del PDF (diseño mejorado)
+            const totalFactura = fact.total_factura || subtotal;
+
+            const firmaHTML = fact.firma ? `
+                <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 2px dashed #cbd5e1;">
+                    <p style="font-weight: 600; color: #2d3748; margin-bottom: 8px; font-size: 14px;">✍️ Firma del Cliente</p>
+                    <img src="${fact.firma}" style="max-width: 220px; max-height: 80px; border: 2px solid #e2e8f0; border-radius: 12px; padding: 6px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                </div>
+            ` : '';
+
             const pdfContent = `
-                <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 210mm; margin: 0 auto; padding: 8mm 10mm; background: white; color: #1a202c;">
-                    <!-- Encabezado -->
-                    <div style="text-align: center; border-bottom: 3px solid #2b6cb0; padding-bottom: 10px; margin-bottom: 20px;">
-                        <h1 style="font-size: 20px; margin: 0; color: #2b6cb0; letter-spacing: 1px;">📍 ${sucursalActual}</h1>
-                        <h2 style="font-size: 18px; margin: 5px 0 0; color: #2d3748;">FACTURA #${fact.num_factura}</h2>
-                    </div>
-
-                    <!-- Datos del cliente -->
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 20px; background: #f7fafc; padding: 12px; border-radius: 8px;">
+                <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 210mm; margin: 0 auto; padding: 8mm 12mm; background: white; color: #1a202c; box-sizing: border-box;">
+                    
+                    <!-- ENCABEZADO CON LOGO Y TÍTULO -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid #2b6cb0; padding-bottom: 12px; margin-bottom: 20px;">
                         <div>
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Cliente:</strong> ${fact.nombre}</p>
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Cédula:</strong> ${fact.cedula}</p>
+                            <h1 style="font-size: 22px; margin: 0; color: #2b6cb0; letter-spacing: 1px;">🏢 ${sucursalNombre}</h1>
+                            <p style="margin: 4px 0 0; font-size: 13px; color: #4a5568;">Comprobante de compra de materiales</p>
                         </div>
                         <div style="text-align: right;">
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Fecha:</strong> ${fecha}</p>
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Hora:</strong> ${new Date().toLocaleTimeString('es-CR')}</p>
+                            <div style="background: #ebf8ff; padding: 6px 14px; border-radius: 20px; display: inline-block;">
+                                <span style="font-weight: bold; font-size: 16px; color: #2b6cb0;">#${fact.num_factura}</span>
+                            </div>
+                            <p style="margin: 4px 0 0; font-size: 12px; color: #718096;">${fecha} - ${hora}</p>
                         </div>
                     </div>
 
-                    <!-- Tabla de materiales -->
-                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+                    <!-- DATOS DEL CLIENTE -->
+                    <div style="background: #f7fafc; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; display: flex; justify-content: space-between; flex-wrap: wrap; border-left: 4px solid #2b6cb0;">
+                        <div>
+                            <p style="margin: 4px 0; font-size: 15px;"><strong style="color: #2d3748;">Cliente:</strong> ${fact.nombre}</p>
+                            <p style="margin: 4px 0; font-size: 15px;"><strong style="color: #2d3748;">Cédula:</strong> ${fact.cedula}</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <p style="margin: 4px 0; font-size: 14px; color: #4a5568;"><strong>Fecha:</strong> ${fecha}</p>
+                            <p style="margin: 4px 0; font-size: 14px; color: #4a5568;"><strong>Hora:</strong> ${hora}</p>
+                        </div>
+                    </div>
+
+                    <!-- TABLA DE MATERIALES -->
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
                         <thead>
                             <tr style="background: #2b6cb0; color: white;">
-                                <th style="padding: 10px; text-align: left; border-radius: 6px 0 0 0;">Material</th>
-                                <th style="padding: 10px; text-align: center;">Cantidad (kg)</th>
-                                <th style="padding: 10px; text-align: right;">Precio Unitario</th>
-                                <th style="padding: 10px; text-align: right; border-radius: 0 6px 0 0;">Total</th>
+                                <th style="padding: 12px 16px; text-align: left; font-weight: 600; font-size: 14px; letter-spacing: 0.5px;">Material</th>
+                                <th style="padding: 12px 16px; text-align: center; font-weight: 600; font-size: 14px; letter-spacing: 0.5px;">Cantidad (kg)</th>
+                                <th style="padding: 12px 16px; text-align: right; font-weight: 600; font-size: 14px; letter-spacing: 0.5px;">Precio Unitario</th>
+                                <th style="padding: 12px 16px; text-align: right; font-weight: 600; font-size: 14px; letter-spacing: 0.5px;">Total</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${detalles}
+                            ${detallesRows}
                         </tbody>
                     </table>
 
-                    <!-- Total -->
-                    <div style="text-align: right; font-size: 18px; font-weight: bold; padding: 12px; background: #ebf8ff; border-radius: 8px; border-left: 5px solid #2b6cb0;">
-                        Total: ₡${fact.total_factura.toLocaleString('es-CR')}
+                    <!-- TOTAL -->
+                    <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+                        <div style="background: #ebf8ff; padding: 14px 30px; border-radius: 12px; border-left: 6px solid #2b6cb0; min-width: 200px; text-align: right;">
+                            <p style="margin: 0; font-size: 14px; color: #2d3748; font-weight: 600;">TOTAL A PAGAR</p>
+                            <p style="margin: 4px 0 0; font-size: 24px; font-weight: 700; color: #2b6cb0;">₡${totalFactura.toLocaleString('es-CR')}</p>
+                        </div>
                     </div>
 
-                    <!-- Firma -->
+                    <!-- FIRMA (si existe) -->
                     ${firmaHTML}
 
-                    <!-- Pie de página -->
-                    <div style="text-align: center; margin-top: 30px; font-size: 12px; color: #718096; border-top: 1px solid #e2e8f0; padding-top: 15px;">
-                        Gracias por su visita - ¡Vuelva pronto!
+                    <!-- PIE DE PÁGINA -->
+                    <div style="margin-top: 30px; border-top: 2px solid #e2e8f0; padding-top: 16px; text-align: center; font-size: 13px; color: #718096;">
+                        <p style="margin: 4px 0;">📞 Atención al cliente: (506) 1234-5678</p>
+                        <p style="margin: 4px 0; font-weight: 500; color: #2d3748;">¡Gracias por su preferencia! Vuelva pronto.</p>
+                        <p style="margin: 8px 0 0; font-size: 11px; color: #a0aec0;">Este documento es un comprobante de compra válido.</p>
                     </div>
                 </div>
             `;
 
-            // Crear un elemento temporal visible (pero oculto a la vista) para renderizar el PDF
+            // Crear contenedor temporal visible pero fuera de la pantalla
             const tempDiv = document.createElement('div');
             tempDiv.style.position = 'fixed';
             tempDiv.style.left = '0';
@@ -1120,12 +1147,12 @@
             tempDiv.style.width = '210mm';
             tempDiv.style.background = 'white';
             tempDiv.style.zIndex = '9999';
-            tempDiv.style.opacity = '0';      // invisible, pero ocupando espacio
+            tempDiv.style.opacity = '0'; // invisible, pero ocupa espacio y se renderiza
             tempDiv.style.pointerEvents = 'none';
             tempDiv.innerHTML = pdfContent;
             document.body.appendChild(tempDiv);
 
-            // Opciones de html2pdf
+            // Opciones para html2pdf
             const opt = {
                 margin:        [10, 10, 10, 10],
                 filename:      `Factura_${fact.num_factura}.pdf`,
