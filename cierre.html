@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistaaema de Facturación y Cierre - Sucursal</title>
+    <title>Sistema de Facturación y Cierre - Sucursal</title>
     <!-- Librería para generar PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
-        /* ESTILOS GENERALES */
+        /* Estilos generales (sin cambios) */
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; background: #f0f2f5; margin: 0; color: #333; }
         .login-box { background: white; padding: 25px; max-width: 400px; margin: 60px auto; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; box-sizing: border-box; }
         .login-box input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
@@ -50,7 +50,6 @@
 </head>
 <body>
 
-    <!-- LOGIN -->
     <div id="login-section" class="login-box" style="display:none;">
         <h2>📝 Ingreso de Sucursal</h2>
         <input type="email" id="email" placeholder="Correo de la sucursal">
@@ -58,7 +57,6 @@
         <button class="btn-blue" onclick="login()">Ingresar al Sistema</button>
     </div>
 
-    <!-- MÓDULO PRINCIPAL -->
     <div id="modulo-principal" class="grid-layout" style="display:none;">
         <!-- CARD PRINCIPAL -->
         <div class="card">
@@ -259,7 +257,7 @@
                     <input type="text" id="cierreMano" readonly style="background:#e2e8f0; font-weight:bold; color:#2e7d32; font-size:18px;">
                 </div>
 
-                <button id="btnEnviarTodo" class="btn-green" onclick="enviarTodoFirebase()">🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA</button>
+                <button id="btnEnviarTodo" class="btn-green" onclick="enviarCierreFirebase()">🚀 ENVIAR CIERRE DEL DÍA</button>
             </div>
         </div>
 
@@ -430,131 +428,12 @@
         }
 
         function guardarFirma() {
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.5); // Calidad reducida para ahorrar espacio
+            const dataUrl = canvas.toDataURL('image/png');
             document.getElementById('firmaDataUrl').value = dataUrl;
             alert('✅ Firma guardada correctamente.');
         }
 
         // ---- FIN FIRMA ----
-
-        // ---- FUNCIONES CON CACHÉ PARA REDUCIR LECTURAS ----
-
-        async function cargarPreciosDesdeFirebase() {
-            const cacheKey = `precios_${uidTrabajador}`;
-            const cacheTimeKey = `precios_time_${uidTrabajador}`;
-            const now = Date.now();
-            const cacheTime = parseInt(localStorage.getItem(cacheTimeKey)) || 0;
-            const cacheDuration = 60 * 60 * 1000; // 1 hora
-
-            if (now - cacheTime < cacheDuration) {
-                const cached = localStorage.getItem(cacheKey);
-                if (cached) {
-                    preciosTrabajador = JSON.parse(cached);
-                    cargarTablaPreciosVisual();
-                    cargarTablaListaMateriales();
-                    cargarSelectEdicionPrecios();
-                    return;
-                }
-            }
-
-            // Si no hay caché válida, leer de Firebase
-            const pDoc = await getDoc(doc(db, "config_precios", uidTrabajador));
-            preciosTrabajador = pDoc.exists() ? (pDoc.data().materiales || {}) : {};
-            
-            // Guardar en caché
-            localStorage.setItem(cacheKey, JSON.stringify(preciosTrabajador));
-            localStorage.setItem(cacheTimeKey, now.toString());
-            
-            cargarTablaPreciosVisual();
-            cargarTablaListaMateriales();
-            cargarSelectEdicionPrecios();
-        }
-
-        async function cargarUltimoCierre() {
-            const cacheKey = `ultimo_cierre_${sucursalActual}`;
-            const cacheTimeKey = `ultimo_cierre_time_${sucursalActual}`;
-            const now = Date.now();
-            const cacheTime = parseInt(localStorage.getItem(cacheTimeKey)) || 0;
-            const cacheDuration = 5 * 60 * 1000; // 5 minutos
-
-            if (now - cacheTime < cacheDuration) {
-                const cached = localStorage.getItem(cacheKey);
-                if (cached) {
-                    const datos = JSON.parse(cached);
-                    mostrarUltimoCierre(datos);
-                    return;
-                }
-            }
-
-            try {
-                const q = query(
-                    collection(db, "revisiones_faltantes"),
-                    where("sucursal", "==", sucursalActual),
-                    orderBy("timestamp", "desc"),
-                    limit(1)
-                );
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                    const datos = snap.docs[0].data();
-                    localStorage.setItem(cacheKey, JSON.stringify(datos));
-                    localStorage.setItem(cacheTimeKey, now.toString());
-                    mostrarUltimoCierre(datos);
-                } else {
-                    document.getElementById('infoUltimoCierre').innerText = "No se encontraron cierres previos registrados.";
-                }
-            } catch (error) {
-                console.error("Error consultando último cierre: ", error);
-            }
-        }
-
-        function mostrarUltimoCierre(datos) {
-            const inicio = parseFloat(datos.caja_inicio) || 0;
-            const cierre = parseFloat(datos.cierre_mano) || 0;
-            document.getElementById('infoUltimoCierre').innerHTML = `
-                <b>📥 Dinero Base Inicial:</b> ₡${inicio.toLocaleString('es-CR')} | 
-                <b>📤 Disponible al Cierre:</b> ₡${cierre.toLocaleString('es-CR')} 
-                <small style="color:#718096;">(${datos.fecha || ''})</small>
-            `;
-        }
-
-        async function calcularDeudaTotal() {
-            const cacheKey = `deuda_${sucursalActual}`;
-            const cacheTimeKey = `deuda_time_${sucursalActual}`;
-            const now = Date.now();
-            const cacheTime = parseInt(localStorage.getItem(cacheTimeKey)) || 0;
-            const cacheDuration = 5 * 60 * 1000; // 5 minutos
-
-            if (now - cacheTime < cacheDuration) {
-                const cached = localStorage.getItem(cacheKey);
-                if (cached) {
-                    document.getElementById('deudaTotalTxt').innerText = parseInt(cached).toLocaleString('es-CR');
-                    return;
-                }
-            }
-
-            try {
-                const q = query(collection(db, "movimientos_cuenta"), where("sucursal", "==", sucursalActual));
-                const querySnapshot = await getDocs(q);
-                
-                let deudaCalculada = 0;
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    const monto = parseFloat(data.monto) || 0;
-                    if (data.tipo === "Salida_Venta") deudaCalculada += monto; 
-                    else if (data.tipo === "Deposito") deudaCalculada -= monto; 
-                });
-                
-                deudaCalculada += obtenerTotalDepositos();
-                document.getElementById('deudaTotalTxt').innerText = deudaCalculada.toLocaleString('es-CR');
-                
-                localStorage.setItem(cacheKey, deudaCalculada.toString());
-                localStorage.setItem(cacheTimeKey, now.toString());
-            } catch (error) {
-                console.error("Error calculando la deuda: ", error);
-            }
-        }
-
-        // ---- FIN FUNCIONES CON CACHÉ ----
 
         onAuthStateChanged(auth, async (user) => {
             if (user) {
@@ -617,19 +496,39 @@
             }
         }
 
-        function cargarTablaPreciosVisual() {
-            const tbody = document.getElementById('body-lista-precios');
-            tbody.innerHTML = "";
-            let tienePrecios = false;
-            for (const [material, precio] of Object.entries(preciosTrabajador)) {
-                if (precio > 0) {
-                    tienePrecios = true;
-                    tbody.innerHTML += `<tr><td>${material}</td><td><b>₡${precio.toLocaleString('es-CR')}</b></td></tr>`;
+        async function cargarUltimoCierre() {
+            try {
+                const q = query(
+                    collection(db, "revisiones_faltantes"),
+                    where("sucursal", "==", sucursalActual),
+                    orderBy("timestamp", "desc"),
+                    limit(1)
+                );
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    const datos = snap.docs[0].data();
+                    const inicio = parseFloat(datos.caja_inicio) || 0;
+                    const cierre = parseFloat(datos.cierre_mano) || 0;
+
+                    document.getElementById('infoUltimoCierre').innerHTML = `
+                        <b>📥 Dinero Base Inicial:</b> ₡${inicio.toLocaleString('es-CR')} | 
+                        <b>📤 Disponible al Cierre:</b> ₡${cierre.toLocaleString('es-CR')} 
+                        <small style="color:#718096;">(${datos.fecha || ''})</small>
+                    `;
+                } else {
+                    document.getElementById('infoUltimoCierre').innerText = "No se encontraron cierres previos registrados.";
                 }
+            } catch (error) {
+                console.error("Error consultando último cierre: ", error);
             }
-            if(!tienePrecios) {
-                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#999;">No hay precios configurados.</td></tr>`;
-            }
+        }
+
+        async function cargarPreciosDesdeFirebase() {
+            const pDoc = await getDoc(doc(db, "config_precios", uidTrabajador));
+            preciosTrabajador = pDoc.exists() ? (pDoc.data().materiales || {}) : {};
+            cargarTablaPreciosVisual();
+            cargarTablaListaMateriales();
+            cargarSelectEdicionPrecios();
         }
 
         function cargarTablaListaMateriales() {
@@ -676,6 +575,27 @@
             document.getElementById('subtotalFacturaTxt').innerText = subtotal.toLocaleString('es-CR');
         }
 
+        async function calcularDeudaTotal() {
+            try {
+                const q = query(collection(db, "movimientos_cuenta"), where("sucursal", "==", sucursalActual));
+                const querySnapshot = await getDocs(q);
+                
+                let deudaCalculada = 0;
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const monto = parseFloat(data.monto) || 0;
+                    if (data.tipo === "Salida_Venta") deudaCalculada += monto; 
+                    else if (data.tipo === "Deposito") deudaCalculada -= monto; 
+                });
+                
+                deudaCalculada += obtenerTotalDepositos();
+
+                document.getElementById('deudaTotalTxt').innerText = deudaCalculada.toLocaleString('es-CR');
+            } catch (error) {
+                console.error("Error calculando la deuda: ", error);
+            }
+        }
+
         window.login = async () => {
             try {
                 await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('pass').value);
@@ -683,6 +603,21 @@
         };
 
         window.logout = () => signOut(auth);
+
+        function cargarTablaPreciosVisual() {
+            const tbody = document.getElementById('body-lista-precios');
+            tbody.innerHTML = "";
+            let tienePrecios = false;
+            for (const [material, precio] of Object.entries(preciosTrabajador)) {
+                if (precio > 0) {
+                    tienePrecios = true;
+                    tbody.innerHTML += `<tr><td>${material}</td><td><b>₡${precio.toLocaleString('es-CR')}</b></td></tr>`;
+                }
+            }
+            if(!tienePrecios) {
+                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#999;">No hay precios configurados.</td></tr>`;
+            }
+        }
 
         function cargarSelectEdicionPrecios() {
             const selectEdicion = document.getElementById('editMatSelect');
@@ -710,9 +645,6 @@
             try {
                 await setDoc(doc(db, "config_precios", uidTrabajador), { materiales: preciosTrabajador }, { merge: true });
                 alert(`✅ Precio actualizado.`);
-                // Limpiar caché de precios
-                localStorage.removeItem(`precios_${uidTrabajador}`);
-                localStorage.removeItem(`precios_time_${uidTrabajador}`);
                 cargarTablaPreciosVisual();
                 cargarTablaListaMateriales();
             } catch (error) { alert("Error: " + error.message); }
@@ -753,6 +685,9 @@
             }
         };
 
+        // ============================================================
+        // NUEVA VERSIÓN: guarda factura en Firebase inmediatamente
+        // ============================================================
         window.guardarFacturaCompletaCliente = async function() {
             const cedula = document.getElementById('cedulaCliente').value.trim();
             const nombre = document.getElementById('nombreCliente').value.trim();
@@ -793,15 +728,16 @@
             }
 
             const firmaData = document.getElementById('firmaDataUrl').value || '';
+            const fecha = document.getElementById('fecha').value || new Date().toISOString().split('T')[0];
 
             try {
-                // Guardar cliente en Firebase (en este momento)
+                // 1. Guardar cliente en Firestore (colección "clientes")
                 await setDoc(doc(db, "clientes", cedulaLimpia), {
                     nombre: nombre,
                     ultima_actualizacion: serverTimestamp()
                 }, { merge: true });
 
-                // Actualizar contador de facturas
+                // 2. Actualizar contador de facturas
                 const docRef = doc(db, "contadores_facturas", sucursalActual);
                 const docSnap = await getDoc(docRef);
                 let ultimoNum = 0;
@@ -809,55 +745,53 @@
                     ultimoNum = docSnap.data().ultimo_numero || 0;
                 }
                 if (numFacturaInt > ultimoNum) {
-                    await setDoc(docRef, {
-                        ultimo_numero: numFacturaInt
-                    }, { merge: true });
+                    await setDoc(docRef, { ultimo_numero: numFacturaInt }, { merge: true });
                 }
-            } catch (err) {
-                console.error("Error guardando cliente o contador: ", err);
-            }
 
-            let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
+                // 3. Calcular total
+                let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
 
-            // Guardar factura en array local (y en localStorage)
-            facturasDelDia.push({
-                num_factura: numFactura,
-                cedula: cedulaLimpia,
-                nombre,
-                detalles_materiales: materialesIngresados,
-                total_factura: totalFactura,
-                firma: firmaData
-            });
+                // 4. Crear objeto factura
+                const facturaObj = {
+                    num_factura: numFactura,
+                    cedula: cedulaLimpia,
+                    nombre: nombre,
+                    detalles_materiales: materialesIngresados,
+                    total_factura: totalFactura,
+                    firma: firmaData,
+                    sucursal: sucursalActual,
+                    fecha: fecha,
+                    uid_trabajador: uidTrabajador,
+                    timestamp: serverTimestamp()
+                };
 
-            localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+                // 5. Guardar factura en Firestore (colección "facturas_compras")
+                await addDoc(collection(db, "facturas_compras"), facturaObj);
 
-            // ---- SUBIR FACTURA A FIREBASE INMEDIATAMENTE (sin esperar el cierre) ----
-            try {
-                const factRef = doc(collection(db, "facturas_compras"));
-                await setDoc(factRef, {
+                // 6. También guardar localmente para el resumen del día
+                facturasDelDia.push({
                     num_factura: numFactura,
                     cedula: cedulaLimpia,
                     nombre,
                     detalles_materiales: materialesIngresados,
                     total_factura: totalFactura,
-                    firma: firmaData,
-                    sucursal: sucursalActual,
-                    fecha: document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR'),
-                    uid_trabajador: uidTrabajador,
-                    timestamp: serverTimestamp(),
-                    estado: "Pendiente" // o "Completada" si quieres
+                    firma: firmaData
                 });
-                console.log("✅ Factura subida a Firebase correctamente.");
-            } catch (error) {
-                console.error("❌ Error al subir factura a Firebase:", error);
-                alert("Error al guardar la factura en Firebase. Se guardó localmente.");
-            }
 
-            actualizarTablaGeneralDia();
-            limpiarFormularioFactura();
-            await obtenerSiguienteNumeroFactura();
-            document.getElementById('cedulaCliente').focus();
-            alert("✅ Factura guardada correctamente (cliente y factura en Firebase).");
+                localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+
+                // 7. Actualizar interfaz y limpiar
+                actualizarTablaGeneralDia();
+                limpiarFormularioFactura();
+                await obtenerSiguienteNumeroFactura();
+                document.getElementById('cedulaCliente').focus();
+
+                alert(`✅ Factura #${numFactura} guardada en Firebase correctamente.`);
+
+            } catch (error) {
+                console.error("Error al guardar factura:", error);
+                alert("❌ Ocurrió un error al guardar la factura. Revisa la consola.");
+            }
         };
 
         function limpiarFormularioFactura() {
@@ -1170,7 +1104,7 @@
             `;
         }
 
-        // --- FUNCIÓN IMPRIMIR (usa el diseño mejorado) ---
+        // --- NUEVA FUNCIÓN IMPRIMIR (usa el mismo diseño mejorado) ---
         window.imprimirFactura = (index) => {
             const fact = facturasDelDia[index];
             if (!fact) return;
@@ -1203,7 +1137,7 @@
             }
         };
 
-        // --- FUNCIÓN DESCARGAR PDF (corregida con div visible) ---
+        // --- FUNCIÓN DESCARGAR PDF (también usa el mismo diseño) ---
         window.descargarFacturaPDF = (index) => {
             const fact = facturasDelDia[index];
             if (!fact) return;
@@ -1211,68 +1145,53 @@
             const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
             const htmlContenido = generarHTMLFactura(fact, fecha);
 
-            // Crear un div visible (opacity:0 pero ocupando espacio) para que html2canvas lo capte
             const tempDiv = document.createElement('div');
-            tempDiv.style.position = 'fixed';
-            tempDiv.style.left = '0';
+            tempDiv.style.position = 'absolute';
+            tempDiv.style.left = '-9999px';
             tempDiv.style.top = '0';
             tempDiv.style.width = '210mm';
-            tempDiv.style.height = '297mm';
             tempDiv.style.background = 'white';
+            tempDiv.style.padding = '0';
             tempDiv.style.zIndex = '9999';
-            tempDiv.style.opacity = '0';
-            tempDiv.style.pointerEvents = 'none';
-            tempDiv.style.overflow = 'hidden';
             tempDiv.innerHTML = htmlContenido;
             document.body.appendChild(tempDiv);
 
-            // Pequeño retraso para que el DOM se renderice
-            setTimeout(() => {
-                const opt = {
-                    margin:        [10, 10, 10, 10],
-                    filename:      `Factura_${fact.num_factura}.pdf`,
-                    image:         { type: 'jpeg', quality: 0.95 },
-                    html2canvas:   { 
-                        scale: 2, 
-                        letterRendering: true, 
-                        useCORS: true, 
-                        logging: false, 
-                        backgroundColor: '#ffffff',
-                        width: 210 * 2.83465,
-                        height: 297 * 2.83465,
-                    },
-                    jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                };
+            const opt = {
+                margin:        [10, 10, 10, 10],
+                filename:      `Factura_${fact.num_factura}.pdf`,
+                image:         { type: 'jpeg', quality: 0.95 },
+                html2canvas:   { scale: 2, letterRendering: true, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+                jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
 
-                html2pdf().set(opt).from(tempDiv).save().then(() => {
-                    document.body.removeChild(tempDiv);
-                }).catch((err) => {
-                    console.error('Error al generar PDF:', err);
-                    document.body.removeChild(tempDiv);
-                    alert('Ocurrió un error al generar el PDF. Intente de nuevo.');
-                });
-            }, 300);
+            html2pdf().set(opt).from(tempDiv).save().then(() => {
+                document.body.removeChild(tempDiv);
+            }).catch((err) => {
+                console.error('Error al generar PDF:', err);
+                document.body.removeChild(tempDiv);
+                alert('Ocurrió un error al generar el PDF. Intente de nuevo.');
+            });
         };
 
-        // --- ENVÍO DE CIERRE A FIREBASE (ya no envía facturas individuales porque se envían al guardar) ---
-        window.enviarTodoFirebase = async function() {
+        // --- NUEVA FUNCIÓN DE CIERRE (solo envía el resumen, no las facturas) ---
+        window.enviarCierreFirebase = async function() {
             if (facturasDelDia.length === 0) {
-                alert("❌ No hay facturas registradas hoy para cerrar.");
+                alert("❌ No hay facturas registradas hoy para enviar el cierre.");
                 return;
             }
-            if(!confirm("¿Desea enviar el cierre total y las facturas al sistema?")) return;
+            if(!confirm("¿Desea enviar el cierre del día (resumen de caja, gastos y depósitos)?")) return;
 
             const btn = document.getElementById('btnEnviarTodo');
-            btn.disabled = true; btn.innerText = "Subiendo Datos...";
+            btn.disabled = true; btn.innerText = "Subiendo Cierre...";
 
             const fecha = document.getElementById('fecha').value;
 
             try {
-                const batch = writeBatch(db);
-
-                const cierreRef = doc(collection(db, "revisiones_faltantes")); 
-                batch.set(cierreRef, {
-                    uid_trabajador: uidTrabajador, sucursal: sucursalActual, fecha,
+                // Solo enviamos el resumen del cierre (sin facturas, porque ya están subidas)
+                await addDoc(collection(db, "revisiones_faltantes"), {
+                    uid_trabajador: uidTrabajador,
+                    sucursal: sucursalActual,
+                    fecha: fecha,
                     caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
                     total_ventas: obtenerNumeroLimpio('ventas'),
                     total_depositos: obtenerTotalDepositos(),
@@ -1280,35 +1199,22 @@
                     pago_materiales: totalAcumuladoComprasDia,
                     gastos_facturas: obtenerTotalGastos(),
                     cierre_mano: obtenerNumeroLimpio('cierreMano'),
-                    estado: "Pendiente", timestamp: serverTimestamp()
+                    estado: "Pendiente",
+                    timestamp: serverTimestamp()
                 });
 
-                // Ya no es necesario enviar facturas porque ya se subieron individualmente
-                // Pero por si acaso, las enviamos también (evita duplicados si ya están)
-                // Podemos omitir este paso si queremos, pero lo dejo para consistencia
-                facturasDelDia.forEach((factura) => {
-                    const factRef = doc(collection(db, "facturas_compras"));
-                    batch.set(factRef, {
-                        ...factura,
-                        cierre_id: cierreRef.id,
-                        sucursal: sucursalActual, fecha, uid_trabajador: uidTrabajador,
-                        timestamp: serverTimestamp()
-                    });
-                });
-
-                await batch.commit();
-                
+                // Limpiar datos locales (pero las facturas ya están en Firebase)
                 localStorage.removeItem(`facturas_${sucursalActual}`);
                 localStorage.removeItem(`gastos_${sucursalActual}`);
                 localStorage.removeItem(`depositos_${sucursalActual}`);
                 localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
                 localStorage.removeItem(`ventas_${sucursalActual}`);
 
-                alert("✅ Cierre guardado con éxito.");
+                alert("✅ Cierre enviado correctamente.");
                 location.reload();
             } catch (e) {
-                alert("Error: " + e.message);
-                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA";
+                alert("Error al enviar el cierre: " + e.message);
+                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE DEL DÍA";
             }
         };
 
@@ -1341,9 +1247,6 @@
                 alert(`✅ ${tipo} registrado correctamente.`);
                 document.getElementById('montoMovimiento').value = "";
                 document.getElementById('motivoMovimiento').value = "";
-                // Invalidar caché de deuda
-                localStorage.removeItem(`deuda_${sucursalActual}`);
-                localStorage.removeItem(`deuda_time_${sucursalActual}`);
                 await calcularDeudaTotal(); 
             } catch (error) {
                 alert("Error: " + error.message);
