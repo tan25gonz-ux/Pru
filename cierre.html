@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Facturación y Cierre - Sucursal</title>
-    <!-- Librería para generar PDF desde HTML -->
+    <title>Sistem1a de Facturación y Cierre - Sucursal</title>
+    <!-- Librería para generar PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
-        /* ESTILOS GENERALES (sin cambios) */
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; background: #f0f2f5; margin: 0; color: #333; }
         .login-box { background: white; padding: 25px; max-width: 400px; margin: 60px auto; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; box-sizing: border-box; }
         .login-box input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
@@ -1046,42 +1045,54 @@
             if (!fact) return;
 
             const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
-            
-            // Generar filas de la tabla con estilo mejorado
+            const hoy = new Date();
+            const vencimiento = new Date(hoy);
+            vencimiento.setDate(vencimiento.getDate() + 15); // vencimiento a 15 días
+
+            // Generar filas de la tabla
             const detalles = fact.detalles_materiales.map(m => 
                 `<tr>
-                    <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; font-weight:500;">${m.material}</td>
-                    <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; text-align:center;">${m.kilos} kg</td>
-                    <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; text-align:right;">₡${m.precio_unitario.toLocaleString('es-CR')}</td>
-                    <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; text-align:right; font-weight:bold;">₡${m.total_pago.toLocaleString('es-CR')}</td>
+                    <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-size:13px;">${m.material}</td>
+                    <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; text-align:center; font-size:13px;">${m.kilos} kg</td>
+                    <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; text-align:right; font-size:13px;">₡${m.precio_unitario.toLocaleString('es-CR')}</td>
+                    <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; text-align:right; font-size:13px; font-weight:600;">₡${m.total_pago.toLocaleString('es-CR')}</td>
                 </tr>`
             ).join('');
 
-            // Firma con estilo
+            // Firma
             const firmaHTML = fact.firma ? 
                 `<div style="margin-top:25px; border-top:2px solid #2b6cb0; padding-top:15px; text-align:center;">
                     <p style="font-weight:bold; color:#2d3748; font-size:14px; margin-bottom:8px;">Firma del Cliente</p>
-                    <img src="${fact.firma}" style="max-width:200px; max-height:80px; border:1px solid #cbd5e1; border-radius:8px; padding:5px; background:white; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+                    <img src="${fact.firma}" style="max-width:180px; max-height:70px; border:1px solid #cbd5e1; border-radius:6px; padding:4px; background:white;">
                 </div>` : '';
 
-            // Diseño completo de la factura
+            // Construir el HTML del PDF (diseño mejorado)
             const pdfContent = `
                 <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 210mm; margin: 0 auto; padding: 8mm 10mm; background: white; color: #1a202c;">
-                    <!-- Encabezado con logo y título -->
-                    <div style="background: #2b6cb0; color: white; padding: 15px 20px; border-radius: 8px 8px 0 0; text-align: center;">
-                        <h1 style="font-size: 22px; margin: 0; letter-spacing: 1px;">📍 ${sucursalActual}</h1>
-                        <h2 style="font-size: 18px; margin: 5px 0 0; font-weight: 300;">FACTURA #${fact.num_factura}</h2>
-                    </div>
-
-                    <!-- Información del cliente -->
-                    <div style="background: #f7fafc; padding: 15px 20px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; margin-bottom: 20px; display: flex; justify-content: space-between; flex-wrap: wrap;">
+                    <!-- Encabezado principal -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #2b6cb0; padding-bottom: 12px; margin-bottom: 20px;">
                         <div>
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Cliente:</strong> ${fact.nombre}</p>
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Cédula:</strong> ${fact.cedula}</p>
+                            <h1 style="font-size: 22px; margin: 0; color: #2b6cb0; letter-spacing: 0.5px;">📍 ${sucursalActual}</h1>
+                            <p style="margin: 4px 0 0; color: #718096; font-size: 13px;">Teléfono: (506) 2222-3333 • Email: info@sucursal.com</p>
                         </div>
                         <div style="text-align: right;">
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Fecha:</strong> ${fecha}</p>
-                            <p style="margin: 4px 0; font-size: 14px;"><strong>Hora:</strong> ${new Date().toLocaleTimeString('es-CR')}</p>
+                            <h2 style="font-size: 18px; margin: 0; color: #2d3748;">FACTURA #${fact.num_factura}</h2>
+                            <p style="margin: 4px 0 0; font-size: 13px; color: #4a5568;">Fecha: ${fecha}</p>
+                            <p style="margin: 2px 0 0; font-size: 13px; color: #4a5568;">Vencimiento: ${vencimiento.toLocaleDateString('es-CR')}</p>
+                        </div>
+                    </div>
+
+                    <!-- Datos del cliente -->
+                    <div style="background: #f7fafc; padding: 14px 18px; border-radius: 8px; margin-bottom: 22px; border: 1px solid #e2e8f0;">
+                        <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
+                            <div>
+                                <p style="margin: 4px 0; font-size: 14px;"><strong>Cliente:</strong> ${fact.nombre}</p>
+                                <p style="margin: 4px 0; font-size: 14px;"><strong>Cédula:</strong> ${fact.cedula}</p>
+                            </div>
+                            <div>
+                                <p style="margin: 4px 0; font-size: 14px;"><strong>Dirección:</strong> (opcional)</p>
+                                <p style="margin: 4px 0; font-size: 14px;"><strong>Teléfono:</strong> (opcional)</p>
+                            </div>
                         </div>
                     </div>
 
@@ -1089,10 +1100,10 @@
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
                         <thead>
                             <tr style="background: #2b6cb0; color: white;">
-                                <th style="padding: 12px 10px; text-align: left;">Material</th>
-                                <th style="padding: 12px 10px; text-align: center;">Cantidad (kg)</th>
-                                <th style="padding: 12px 10px; text-align: right;">Precio Unitario</th>
-                                <th style="padding: 12px 10px; text-align: right;">Total</th>
+                                <th style="padding: 10px 12px; text-align: left; font-weight: 600;">Material</th>
+                                <th style="padding: 10px 12px; text-align: center; font-weight: 600;">Cantidad (kg)</th>
+                                <th style="padding: 10px 12px; text-align: right; font-weight: 600;">Precio Unitario</th>
+                                <th style="padding: 10px 12px; text-align: right; font-weight: 600;">Importe</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1100,9 +1111,18 @@
                         </tbody>
                     </table>
 
-                    <!-- Total -->
-                    <div style="text-align: right; font-size: 20px; font-weight: bold; padding: 15px 20px; background: #ebf8ff; border-radius: 8px; border-left: 5px solid #2b6cb0;">
-                        Total: ₡${fact.total_factura.toLocaleString('es-CR')}
+                    <!-- Totales -->
+                    <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+                        <div style="width: 60%; max-width: 300px;">
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8f0;">
+                                <span style="font-weight: 600;">Subtotal</span>
+                                <span>₡${fact.total_factura.toLocaleString('es-CR')}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 2px solid #2b6cb0; font-size: 18px; font-weight: bold; background: #ebf8ff; border-radius: 0 0 6px 6px; padding: 10px 12px;">
+                                <span>TOTAL A PAGAR</span>
+                                <span>₡${fact.total_factura.toLocaleString('es-CR')}</span>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Firma -->
@@ -1110,12 +1130,12 @@
 
                     <!-- Pie de página -->
                     <div style="text-align: center; margin-top: 30px; font-size: 12px; color: #718096; border-top: 1px solid #e2e8f0; padding-top: 15px;">
-                        Gracias por su visita - ¡Vuelva pronto!
+                        Gracias por su compra - ¡Vuelva pronto!
                     </div>
                 </div>
             `;
 
-            // Crear un elemento temporal visible pero fuera de la pantalla
+            // Crear elemento temporal fuera de pantalla
             const tempDiv = document.createElement('div');
             tempDiv.style.position = 'absolute';
             tempDiv.style.left = '-9999px';
@@ -1127,7 +1147,6 @@
             tempDiv.innerHTML = pdfContent;
             document.body.appendChild(tempDiv);
 
-            // Opciones de html2pdf
             const opt = {
                 margin:        [10, 10, 10, 10],
                 filename:      `Factura_${fact.num_factura}.pdf`,
@@ -1136,7 +1155,6 @@
                 jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
 
-            // Generar y descargar
             html2pdf().set(opt).from(tempDiv).save().then(() => {
                 document.body.removeChild(tempDiv);
             }).catch((err) => {
