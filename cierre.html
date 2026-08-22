@@ -257,7 +257,7 @@
                     <input type="text" id="cierreMano" readonly style="background:#e2e8f0; font-weight:bold; color:#2e7d32; font-size:18px;">
                 </div>
 
-                <button id="btnEnviarTodo" class="btn-green" onclick="enviarTodoFirebase()">🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA</button>
+                <button id="btnEnviarTodo" class="btn-green" onclick="enviarCierreFirebase()">🚀 ENVIAR CIERRE DEL DÍA</button>
             </div>
         </div>
 
@@ -685,6 +685,9 @@
             }
         };
 
+        // ============================================================
+        // NUEVA VERSIÓN: guarda factura en Firebase inmediatamente
+        // ============================================================
         window.guardarFacturaCompletaCliente = async function() {
             const cedula = document.getElementById('cedulaCliente').value.trim();
             const nombre = document.getElementById('nombreCliente').value.trim();
@@ -725,13 +728,16 @@
             }
 
             const firmaData = document.getElementById('firmaDataUrl').value || '';
+            const fecha = document.getElementById('fecha').value || new Date().toISOString().split('T')[0];
 
             try {
+                // 1. Guardar cliente en Firestore (colección "clientes")
                 await setDoc(doc(db, "clientes", cedulaLimpia), {
                     nombre: nombre,
                     ultima_actualizacion: serverTimestamp()
                 }, { merge: true });
 
+                // 2. Actualizar contador de facturas
                 const docRef = doc(db, "contadores_facturas", sucursalActual);
                 const docSnap = await getDoc(docRef);
                 let ultimoNum = 0;
@@ -739,31 +745,53 @@
                     ultimoNum = docSnap.data().ultimo_numero || 0;
                 }
                 if (numFacturaInt > ultimoNum) {
-                    await setDoc(docRef, {
-                        ultimo_numero: numFacturaInt
-                    }, { merge: true });
+                    await setDoc(docRef, { ultimo_numero: numFacturaInt }, { merge: true });
                 }
-            } catch (err) {
-                console.error("Error guardando cliente o contador: ", err);
+
+                // 3. Calcular total
+                let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
+
+                // 4. Crear objeto factura
+                const facturaObj = {
+                    num_factura: numFactura,
+                    cedula: cedulaLimpia,
+                    nombre: nombre,
+                    detalles_materiales: materialesIngresados,
+                    total_factura: totalFactura,
+                    firma: firmaData,
+                    sucursal: sucursalActual,
+                    fecha: fecha,
+                    uid_trabajador: uidTrabajador,
+                    timestamp: serverTimestamp()
+                };
+
+                // 5. Guardar factura en Firestore (colección "facturas_compras")
+                await addDoc(collection(db, "facturas_compras"), facturaObj);
+
+                // 6. También guardar localmente para el resumen del día
+                facturasDelDia.push({
+                    num_factura: numFactura,
+                    cedula: cedulaLimpia,
+                    nombre,
+                    detalles_materiales: materialesIngresados,
+                    total_factura: totalFactura,
+                    firma: firmaData
+                });
+
+                localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+
+                // 7. Actualizar interfaz y limpiar
+                actualizarTablaGeneralDia();
+                limpiarFormularioFactura();
+                await obtenerSiguienteNumeroFactura();
+                document.getElementById('cedulaCliente').focus();
+
+                alert(`✅ Factura #${numFactura} guardada en Firebase correctamente.`);
+
+            } catch (error) {
+                console.error("Error al guardar factura:", error);
+                alert("❌ Ocurrió un error al guardar la factura. Revisa la consola.");
             }
-
-            let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
-
-            facturasDelDia.push({
-                num_factura: numFactura,
-                cedula: cedulaLimpia,
-                nombre,
-                detalles_materiales: materialesIngresados,
-                total_factura: totalFactura,
-                firma: firmaData
-            });
-
-            localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
-
-            actualizarTablaGeneralDia();
-            limpiarFormularioFactura();
-            await obtenerSiguienteNumeroFactura();
-            document.getElementById('cedulaCliente').focus();
         };
 
         function limpiarFormularioFactura() {
@@ -1091,7 +1119,6 @@
                         <head>
                             <title>Factura #${fact.num_factura}</title>
                             <style>
-                                /* Estilos para impresión */
                                 * { margin: 0; padding: 0; box-sizing: border-box; }
                                 body { background: white; font-family: 'Segoe UI', Arial, sans-serif; }
                                 @media print {
@@ -1146,25 +1173,25 @@
             });
         };
 
-        // --- ENVÍO A FIREBASE ---
-        window.enviarTodoFirebase = async function() {
+        // --- NUEVA FUNCIÓN DE CIERRE (solo envía el resumen, no las facturas) ---
+        window.enviarCierreFirebase = async function() {
             if (facturasDelDia.length === 0) {
-                alert("❌ No hay facturas registradas hoy para cerrar.");
+                alert("❌ No hay facturas registradas hoy para enviar el cierre.");
                 return;
             }
-            if(!confirm("¿Desea enviar el cierre total y las facturas al sistema?")) return;
+            if(!confirm("¿Desea enviar el cierre del día (resumen de caja, gastos y depósitos)?")) return;
 
             const btn = document.getElementById('btnEnviarTodo');
-            btn.disabled = true; btn.innerText = "Subiendo Datos...";
+            btn.disabled = true; btn.innerText = "Subiendo Cierre...";
 
             const fecha = document.getElementById('fecha').value;
 
             try {
-                const batch = writeBatch(db);
-
-                const cierreRef = doc(collection(db, "revisiones_faltantes")); 
-                batch.set(cierreRef, {
-                    uid_trabajador: uidTrabajador, sucursal: sucursalActual, fecha,
+                // Solo enviamos el resumen del cierre (sin facturas, porque ya están subidas)
+                await addDoc(collection(db, "revisiones_faltantes"), {
+                    uid_trabajador: uidTrabajador,
+                    sucursal: sucursalActual,
+                    fecha: fecha,
                     caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
                     total_ventas: obtenerNumeroLimpio('ventas'),
                     total_depositos: obtenerTotalDepositos(),
@@ -1172,32 +1199,22 @@
                     pago_materiales: totalAcumuladoComprasDia,
                     gastos_facturas: obtenerTotalGastos(),
                     cierre_mano: obtenerNumeroLimpio('cierreMano'),
-                    estado: "Pendiente", timestamp: serverTimestamp()
+                    estado: "Pendiente",
+                    timestamp: serverTimestamp()
                 });
 
-                facturasDelDia.forEach((factura) => {
-                    const factRef = doc(collection(db, "facturas_compras"));
-                    batch.set(factRef, {
-                        ...factura,
-                        cierre_id: cierreRef.id,
-                        sucursal: sucursalActual, fecha, uid_trabajador: uidTrabajador,
-                        timestamp: serverTimestamp()
-                    });
-                });
-
-                await batch.commit();
-                
+                // Limpiar datos locales (pero las facturas ya están en Firebase)
                 localStorage.removeItem(`facturas_${sucursalActual}`);
                 localStorage.removeItem(`gastos_${sucursalActual}`);
                 localStorage.removeItem(`depositos_${sucursalActual}`);
                 localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
                 localStorage.removeItem(`ventas_${sucursalActual}`);
 
-                alert("✅ Cierre guardado con éxito.");
+                alert("✅ Cierre enviado correctamente.");
                 location.reload();
             } catch (e) {
-                alert("Error: " + e.message);
-                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA";
+                alert("Error al enviar el cierre: " + e.message);
+                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE DEL DÍA";
             }
         };
 
