@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem1a de Facturación y Cierre - Sucursal</title>
+    <title>Sistema de Facturación y Cierre - Sucursal</title>
     <!-- Librería para generar PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
+        /* Estilos generales (sin cambios) */
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; background: #f0f2f5; margin: 0; color: #333; }
         .login-box { background: white; padding: 25px; max-width: 400px; margin: 60px auto; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; box-sizing: border-box; }
         .login-box input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
@@ -57,7 +58,7 @@
     </div>
 
     <div id="modulo-principal" class="grid-layout" style="display:none;">
-        
+        <!-- CARD PRINCIPAL -->
         <div class="card">
             <button onclick="logout()" style="float: right; background:#ff5252; color:white; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; margin-left: 10px; min-height: auto;">Cerrar Sesión</button>
             <h3>📍 Sucursal: <span id="sucursal-txt" style="color:#2e7d32">...</span></h3>
@@ -72,6 +73,7 @@
                 <input type="date" id="fecha">
             </div>
 
+            <!-- 1. FACTURACIÓN -->
             <div class="seccion-interna" style="border: 1px solid #4299e1; background: #f0f8ff;">
                 <h4 style="margin-bottom:10px; color:#2b6cb0;">🛒 1. FACTURACIÓN ACTUAL (RECIBO DE MATERIAL)</h4>
                 
@@ -125,6 +127,7 @@
                 <button class="btn-save-fact" onclick="guardarFacturaCompletaCliente()">💾 GUARDAR FACTURA DE CLIENTE</button>
             </div>
 
+            <!-- 2. FACTURAS REGISTRADAS -->
             <div class="seccion-interna">
                 <h4>📋 2. FACTURAS REGISTRADAS HOY</h4>
                 <div class="table-responsive">
@@ -146,6 +149,7 @@
                 </div>
             </div>
 
+            <!-- 3. TOTALES POR MATERIAL -->
             <div class="seccion-interna">
                 <h4>📊 3. TOTALES POR MATERIAL COMPRADO HOY</h4>
                 <div class="table-responsive">
@@ -162,6 +166,7 @@
                 </div>
             </div>
 
+            <!-- 4. CONTROL DE CAJA -->
             <div class="seccion-interna" style="background:#f1f5f9;">
                 <h4>💵 4. CONTROL DE CAJA Y ARQUEO</h4>
                 <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
@@ -256,6 +261,7 @@
             </div>
         </div>
 
+        <!-- PANEL LATERAL -->
         <div class="panel-lateral">
             <div class="mini-deuda-box">
                 Deuda Total Sucursal:<br>
@@ -980,76 +986,12 @@
             actualizarTablaGeneralDia();
         };
 
-        // --- FUNCIÓN PARA IMPRIMIR (ventana de impresión, formato ticket) ---
-        window.imprimirFactura = (index) => {
-            const fact = facturasDelDia[index];
-            if (!fact) return;
-
-            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
-            const detalles = fact.detalles_materiales.map(m => 
-                `<tr><td>${m.material}</td><td>${m.kilos} kg</td><td>₡${m.precio_unitario.toLocaleString('es-CR')}</td><td>₡${m.total_pago.toLocaleString('es-CR')}</td></tr>`
-            ).join('');
-
-            const firmaHTML = fact.firma ? 
-                `<div style="text-align:center; margin-top:20px;"><b>Firma del Cliente</b><br><img src="${fact.firma}" style="max-width:150px; max-height:60px;"></div>` : '';
-
-            const contenido = `
-                <html>
-                <head><title>Factura #${fact.num_factura}</title>
-                <style>
-                    @page { margin: 5mm; size: 80mm auto; }
-                    body { font-family: Arial, sans-serif; font-size: 12px; max-width: 72mm; margin: 0 auto; padding: 0; }
-                    h2 { text-align: center; font-size: 14px; margin: 5px 0; }
-                    .info { font-size: 11px; margin-bottom: 10px; }
-                    .info p { margin: 2px 0; }
-                    table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11px; }
-                    th { background: #eee; text-align: left; padding: 4px; border-bottom: 1px solid #999; }
-                    td { padding: 4px; border-bottom: 1px solid #ddd; }
-                    .total { font-weight: bold; font-size: 13px; text-align: right; margin-top: 10px; border-top: 2px solid #333; padding-top: 5px; }
-                    .footer { margin-top: 15px; font-size: 10px; color: #555; text-align: center; }
-                </style>
-                </head>
-                <body>
-                    <h2>📍 ${sucursalActual}</h2>
-                    <h2>FACTURA #${fact.num_factura}</h2>
-                    <div class="info">
-                        <p><b>Fecha:</b> ${fecha}</p>
-                        <p><b>Cliente:</b> ${fact.nombre}</p>
-                        <p><b>Cédula:</b> ${fact.cedula}</p>
-                    </div>
-                    <table>
-                        <thead><tr><th>Material</th><th>Kg</th><th>₡/Kg</th><th>Total</th></tr></thead>
-                        <tbody>${detalles}</tbody>
-                    </table>
-                    <div class="total">Total: ₡${fact.total_factura.toLocaleString('es-CR')}</div>
-                    ${firmaHTML}
-                    <div class="footer">Gracias por su visita</div>
-                </body>
-                </html>
-            `;
-
-            const ventana = window.open('', '_blank', 'width=800,height=600');
-            if (ventana) {
-                ventana.document.write(contenido);
-                ventana.document.close();
-                ventana.focus();
-                setTimeout(() => ventana.print(), 500);
-            } else {
-                alert('Por favor, permita ventanas emergentes para imprimir.');
-            }
-        };
-
-        // --- NUEVA FUNCIÓN: DESCARGAR PDF (diseño profesional A4) ---
-        window.descargarFacturaPDF = (index) => {
-            const fact = facturasDelDia[index];
-            if (!fact) return;
-
-            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
+        // --- FUNCIÓN QUE GENERA EL HTML DE LA FACTURA (reutilizable) ---
+        function generarHTMLFactura(fact, fecha) {
             const hoy = new Date();
             const vencimiento = new Date(hoy);
-            vencimiento.setDate(vencimiento.getDate() + 15); // vencimiento a 15 días
+            vencimiento.setDate(vencimiento.getDate() + 15);
 
-            // Generar filas de la tabla
             const detalles = fact.detalles_materiales.map(m => 
                 `<tr>
                     <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-size:13px;">${m.material}</td>
@@ -1059,17 +1001,15 @@
                 </tr>`
             ).join('');
 
-            // Firma
             const firmaHTML = fact.firma ? 
                 `<div style="margin-top:25px; border-top:2px solid #2b6cb0; padding-top:15px; text-align:center;">
                     <p style="font-weight:bold; color:#2d3748; font-size:14px; margin-bottom:8px;">Firma del Cliente</p>
                     <img src="${fact.firma}" style="max-width:180px; max-height:70px; border:1px solid #cbd5e1; border-radius:6px; padding:4px; background:white;">
                 </div>` : '';
 
-            // Construir el HTML del PDF (diseño mejorado)
-            const pdfContent = `
+            return `
                 <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 210mm; margin: 0 auto; padding: 8mm 10mm; background: white; color: #1a202c;">
-                    <!-- Encabezado principal -->
+                    <!-- Encabezado -->
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #2b6cb0; padding-bottom: 12px; margin-bottom: 20px;">
                         <div>
                             <h1 style="font-size: 22px; margin: 0; color: #2b6cb0; letter-spacing: 0.5px;">📍 ${sucursalActual}</h1>
@@ -1096,7 +1036,7 @@
                         </div>
                     </div>
 
-                    <!-- Tabla de materiales -->
+                    <!-- Tabla -->
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
                         <thead>
                             <tr style="background: #2b6cb0; color: white;">
@@ -1134,8 +1074,50 @@
                     </div>
                 </div>
             `;
+        }
 
-            // Crear elemento temporal fuera de pantalla
+        // --- NUEVA FUNCIÓN IMPRIMIR (usa el mismo diseño mejorado) ---
+        window.imprimirFactura = (index) => {
+            const fact = facturasDelDia[index];
+            if (!fact) return;
+
+            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
+            const htmlContenido = generarHTMLFactura(fact, fecha);
+
+            const ventana = window.open('', '_blank', 'width=800,height=600');
+            if (ventana) {
+                ventana.document.write(`
+                    <html>
+                        <head>
+                            <title>Factura #${fact.num_factura}</title>
+                            <style>
+                                /* Estilos para impresión */
+                                * { margin: 0; padding: 0; box-sizing: border-box; }
+                                body { background: white; font-family: 'Segoe UI', Arial, sans-serif; }
+                                @media print {
+                                    body { margin: 0; padding: 0; }
+                                }
+                            </style>
+                        </head>
+                        <body>${htmlContenido}</body>
+                    </html>
+                `);
+                ventana.document.close();
+                ventana.focus();
+                setTimeout(() => ventana.print(), 500);
+            } else {
+                alert('Por favor, permita ventanas emergentes para imprimir.');
+            }
+        };
+
+        // --- FUNCIÓN DESCARGAR PDF (también usa el mismo diseño) ---
+        window.descargarFacturaPDF = (index) => {
+            const fact = facturasDelDia[index];
+            if (!fact) return;
+
+            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
+            const htmlContenido = generarHTMLFactura(fact, fecha);
+
             const tempDiv = document.createElement('div');
             tempDiv.style.position = 'absolute';
             tempDiv.style.left = '-9999px';
@@ -1144,7 +1126,7 @@
             tempDiv.style.background = 'white';
             tempDiv.style.padding = '0';
             tempDiv.style.zIndex = '9999';
-            tempDiv.innerHTML = pdfContent;
+            tempDiv.innerHTML = htmlContenido;
             document.body.appendChild(tempDiv);
 
             const opt = {
@@ -1164,6 +1146,7 @@
             });
         };
 
+        // --- ENVÍO A FIREBASE ---
         window.enviarTodoFirebase = async function() {
             if (facturasDelDia.length === 0) {
                 alert("❌ No hay facturas registradas hoy para cerrar.");
@@ -1218,6 +1201,7 @@
             }
         };
 
+        // --- MOVIMIENTOS CUENTA ---
         window.guardarMovimientoCuenta = async function() {
             const tipo = document.getElementById('tipoMovimiento').value;
             const monto = obtenerNumeroLimpio('montoMovimiento');
