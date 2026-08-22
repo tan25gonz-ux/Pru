@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Facturación y Cierre - Sucursal</title>
-    <!-- Librería para generar PDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- Librerías necesarias -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         /* Estilos generales (sin cambios) */
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; background: #f0f2f5; margin: 0; color: #333; }
@@ -38,7 +38,7 @@
         .scroll-precios { max-height: 300px; overflow-y: auto; margin-bottom: 12px; border-radius: 8px; }
         .box-ultimo-cierre { background: #edf2f7; border-left: 4px solid #3182ce; padding: 10px 14px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #2d3748; }
         .btn-print { background: #2b6cb0; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
-        .btn-pdf { background: #38a169; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
+        .btn-image { background: #d69e2e; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
         #firmaCanvas { border: 1px solid #ccc; border-radius: 8px; background: white; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
         @media(max-width: 850px) {
             .grid-layout { grid-template-columns: 1fr; gap: 16px; }
@@ -50,6 +50,7 @@
 </head>
 <body>
 
+    <!-- LOGIN -->
     <div id="login-section" class="login-box" style="display:none;">
         <h2>📝 Ingreso de Sucursal</h2>
         <input type="email" id="email" placeholder="Correo de la sucursal">
@@ -57,6 +58,7 @@
         <button class="btn-blue" onclick="login()">Ingresar al Sistema</button>
     </div>
 
+    <!-- MÓDULO PRINCIPAL -->
     <div id="modulo-principal" class="grid-layout" style="display:none;">
         <!-- CARD PRINCIPAL -->
         <div class="card">
@@ -985,7 +987,7 @@
                             <td><b>₡${montoFactura.toLocaleString('es-CR')}</b></td>
                             <td style="display: flex; gap: 4px; flex-wrap: wrap;">
                                 <button onclick="imprimirFactura(${index})" class="btn-print" style="background:#2b6cb0; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">🖨️</button>
-                                <button onclick="descargarFacturaPDF(${index})" class="btn-pdf" style="background:#38a169; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">📄 PDF</button>
+                                <button onclick="descargarFacturaImagen(${index})" class="btn-image" style="background:#d69e2e; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">📷 Imagen</button>
                                 <button onclick="eliminarFacturaGeneral(${index})" class="btn-del" style="background:#ff5252; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">x</button>
                             </td>
                         </tr>
@@ -1104,7 +1106,54 @@
             `;
         }
 
-        // --- NUEVA FUNCIÓN IMPRIMIR (usa el mismo diseño mejorado) ---
+        // --- NUEVA FUNCIÓN PARA DESCARGAR IMAGEN (reemplaza al PDF) ---
+        window.descargarFacturaImagen = (index) => {
+            const fact = facturasDelDia[index];
+            if (!fact) return;
+
+            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
+            const htmlContenido = generarHTMLFactura(fact, fecha);
+
+            // Crear un contenedor temporal visible pero oculto para la captura
+            const tempDiv = document.createElement('div');
+            tempDiv.style.position = 'fixed';
+            tempDiv.style.left = '0';
+            tempDiv.style.top = '0';
+            tempDiv.style.width = '210mm';
+            tempDiv.style.height = '297mm';
+            tempDiv.style.background = 'white';
+            tempDiv.style.zIndex = '9999';
+            tempDiv.style.opacity = '0';
+            tempDiv.style.pointerEvents = 'none';
+            tempDiv.style.overflow = 'hidden';
+            tempDiv.innerHTML = htmlContenido;
+            document.body.appendChild(tempDiv);
+
+            // Esperar un momento para que el DOM se renderice
+            setTimeout(() => {
+                html2canvas(tempDiv, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff',
+                    width: 210 * 2.83465, // 210mm en píxeles
+                    height: 297 * 2.83465,
+                }).then((canvas) => {
+                    // Crear un enlace de descarga para la imagen
+                    const link = document.createElement('a');
+                    link.download = `Factura_${fact.num_factura}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    document.body.removeChild(tempDiv);
+                }).catch((err) => {
+                    console.error('Error al generar imagen:', err);
+                    document.body.removeChild(tempDiv);
+                    alert('Ocurrió un error al generar la imagen. Intente de nuevo.');
+                });
+            }, 300);
+        };
+
+        // --- FUNCIÓN IMPRIMIR (mantiene el diseño) ---
         window.imprimirFactura = (index) => {
             const fact = facturasDelDia[index];
             if (!fact) return;
@@ -1135,42 +1184,6 @@
             } else {
                 alert('Por favor, permita ventanas emergentes para imprimir.');
             }
-        };
-
-        // --- FUNCIÓN DESCARGAR PDF (también usa el mismo diseño) ---
-        window.descargarFacturaPDF = (index) => {
-            const fact = facturasDelDia[index];
-            if (!fact) return;
-
-            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
-            const htmlContenido = generarHTMLFactura(fact, fecha);
-
-            const tempDiv = document.createElement('div');
-            tempDiv.style.position = 'absolute';
-            tempDiv.style.left = '-9999px';
-            tempDiv.style.top = '0';
-            tempDiv.style.width = '210mm';
-            tempDiv.style.background = 'white';
-            tempDiv.style.padding = '0';
-            tempDiv.style.zIndex = '9999';
-            tempDiv.innerHTML = htmlContenido;
-            document.body.appendChild(tempDiv);
-
-            const opt = {
-                margin:        [10, 10, 10, 10],
-                filename:      `Factura_${fact.num_factura}.pdf`,
-                image:         { type: 'jpeg', quality: 0.95 },
-                html2canvas:   { scale: 2, letterRendering: true, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-                jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-
-            html2pdf().set(opt).from(tempDiv).save().then(() => {
-                document.body.removeChild(tempDiv);
-            }).catch((err) => {
-                console.error('Error al generar PDF:', err);
-                document.body.removeChild(tempDiv);
-                alert('Ocurrió un error al generar el PDF. Intente de nuevo.');
-            });
         };
 
         // --- NUEVA FUNCIÓN DE CIERRE (solo envía el resumen, no las facturas) ---
