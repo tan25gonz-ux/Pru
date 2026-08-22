@@ -4,854 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Facturación y Cierre - Sucursal</title>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, writeBatch, serverTimestamp, query, where, getDocs, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyCi409CkmXBbun7-POejbVaIiThK2nZ1JY",
-            authDomain: "prestamos-18dd8.firebaseapp.com",
-            projectId: "prestamos-18dd8",
-            storageBucket: "prestamos-18dd8.firebasestorage.app",
-            messagingSenderId: "921713515466",
-            appId: "1:921713515466:web:0e2bcb5d67067068570d33"
-        };
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-
-        const listaMaterialesBase = [
-            "ACERO INOXIDABLE", "ALUMINIO", "BATERIA CARRO", "BRONCE", "CARTON", 
-            "CATALIZADOR", "CHATARRA", "COBRE", "GALONES", "PET", "TETRABRIK", 
-            "TARJETA", "LAVADORAS", "MOTORES", "LATAS ALUMINIO", "PAPEL REVUELTO", 
-            "PAPEL BLANCO", "PAPEL COLOR", "PERIODICO", "RADIADOR Cobre Bronce", 
-            "RADIADOR Cobre Aluminio", "RADIADOR ALUMINIO", "CAJA PLASTICA", 
-            "BOLSA TRANSPAR.", "BOLSA COLOR", "VIDRIO", "CABLE ELECTRICO", "OTROS"
-        ];
-
-        let preciosTrabajador = {};
-        let facturasDelDia = []; 
-        let listaGastosDia = []; 
-        let listaDepositosDia = []; 
-        let uidTrabajador = null;
-        let totalAcumuladoComprasDia = 0;
-        let sucursalActual = "Desconocida";
-
-        // ---- FIRMA DIGITAL ----
-        let canvas, ctx, isDrawing = false, lastX = 0, lastY = 0;
-
-        function initFirma() {
-            canvas = document.getElementById('firmaCanvas');
-            if (!canvas) return;
-            ctx = canvas.getContext('2d');
-            resizeCanvas();
-            window.addEventListener('resize', resizeCanvas);
-
-            // Eventos mouse
-            canvas.addEventListener('mousedown', startDrawing);
-            canvas.addEventListener('mousemove', draw);
-            canvas.addEventListener('mouseup', stopDrawing);
-            canvas.addEventListener('mouseout', stopDrawing);
-            // Eventos touch
-            canvas.addEventListener('touchstart', startDrawing);
-            canvas.addEventListener('touchmove', draw);
-            canvas.addEventListener('touchend', stopDrawing);
-
-            document.getElementById('limpiarFirmaBtn')?.addEventListener('click', limpiarFirma);
-            document.getElementById('guardarFirmaBtn')?.addEventListener('click', guardarFirma);
-        }
-
-        function resizeCanvas() {
-            if (!canvas) return;
-            const rect = canvas.getBoundingClientRect();
-            canvas.width = rect.width * 2;
-            canvas.height = (rect.width * 0.4) * 2;
-            ctx.scale(2, 2);
-        }
-
-        function getPos(e) {
-            const rect = canvas.getBoundingClientRect();
-            let clientX, clientY;
-            if (e.touches) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-                e.preventDefault();
-            } else {
-                clientX = e.clientX;
-                clientY = e.clientY;
-            }
-            return {
-                x: (clientX - rect.left) * (canvas.width / (rect.width * 2)),
-                y: (clientY - rect.top) * (canvas.height / (rect.height * 2))
-            };
-        }
-
-        function startDrawing(e) {
-            isDrawing = true;
-            const pos = getPos(e);
-            lastX = pos.x;
-            lastY = pos.y;
-            ctx.beginPath();
-            ctx.moveTo(lastX, lastY);
-        }
-
-        function draw(e) {
-            if (!isDrawing) return;
-            e.preventDefault();
-            const pos = getPos(e);
-            ctx.lineWidth = 2;
-            ctx.lineCap = 'round';
-            ctx.strokeStyle = '#000';
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
-            lastX = pos.x;
-            lastY = pos.y;
-        }
-
-        function stopDrawing() {
-            isDrawing = false;
-        }
-
-        function limpiarFirma() {
-            if (!ctx) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            document.getElementById('firmaDataUrl').value = '';
-        }
-
-        function guardarFirma() {
-            const dataUrl = canvas.toDataURL('image/png');
-            document.getElementById('firmaDataUrl').value = dataUrl;
-            alert('✅ Firma guardada correctamente.');
-        }
-
-        // ---- FIN FIRMA ----
-
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                uidTrabajador = user.uid;
-                const emailUsuario = user.email ? user.email.toLowerCase().trim() : "";
-
-                if (emailUsuario.includes("perez")) {
-                    sucursalActual = "Perez";
-                } else if (emailUsuario.includes("paraiso")) { 
-                    sucursalActual = "Paraiso";
-                } else if (emailUsuario.includes("cartago")) {
-                    sucursalActual = "Cartago";
-                } else {
-                    sucursalActual = "Desconocida";
-                }
-
-                document.getElementById('login-section').style.display = 'none';
-                document.getElementById('modulo-principal').style.display = 'grid';
-                document.getElementById('sucursal-txt').innerText = sucursalActual;
-                
-                const facturasGuardadas = localStorage.getItem(`facturas_${sucursalActual}`);
-                if (facturasGuardadas) facturasDelDia = JSON.parse(facturasGuardadas);
-
-                const gastosGuardados = localStorage.getItem(`gastos_${sucursalActual}`);
-                if (gastosGuardados) listaGastosDia = JSON.parse(gastosGuardados);
-
-                const depositosGuardados = localStorage.getItem(`depositos_${sucursalActual}`);
-                if (depositosGuardados) listaDepositosDia = JSON.parse(depositosGuardados);
-
-                document.getElementById('cajaInicioBase').value = localStorage.getItem(`cajaInicioBase_${sucursalActual}`) || "";
-                document.getElementById('ventas').value = localStorage.getItem(`ventas_${sucursalActual}`) || "";
-
-                await cargarPreciosDesdeFirebase();
-                await calcularDeudaTotal();
-                await cargarUltimoCierre();
-                await obtenerSiguienteNumeroFactura();
-                actualizarTablaGeneralDia(); 
-                actualizarTablaGastos();
-                actualizarTablaDepositos();
-
-                // Inicializar firma después de que el DOM esté listo
-                setTimeout(initFirma, 100);
-            } else {
-                document.getElementById('login-section').style.display = 'block';
-                document.getElementById('modulo-principal').style.display = 'none';
-            }
-        });
-
-        async function obtenerSiguienteNumeroFactura() {
-            try {
-                const docRef = doc(db, "contadores_facturas", sucursalActual);
-                const docSnap = await getDoc(docRef);
-                let siguienteNum = 1;
-
-                if (docSnap.exists()) {
-                    siguienteNum = (docSnap.data().ultimo_numero || 0) + 1;
-                }
-                document.getElementById('numFacturaCliente').value = siguienteNum;
-            } catch (error) {
-                console.error("Error al obtener número de factura:", error);
-            }
-        }
-
-        async function cargarUltimoCierre() {
-            try {
-                const q = query(
-                    collection(db, "revisiones_faltantes"),
-                    where("sucursal", "==", sucursalActual),
-                    orderBy("timestamp", "desc"),
-                    limit(1)
-                );
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                    const datos = snap.docs[0].data();
-                    const inicio = parseFloat(datos.caja_inicio) || 0;
-                    const cierre = parseFloat(datos.cierre_mano) || 0;
-
-                    document.getElementById('infoUltimoCierre').innerHTML = `
-                        <b>📥 Dinero Base Inicial:</b> ₡${inicio.toLocaleString('es-CR')} | 
-                        <b>📤 Disponible al Cierre:</b> ₡${cierre.toLocaleString('es-CR')} 
-                        <small style="color:#718096;">(${datos.fecha || ''})</small>
-                    `;
-                } else {
-                    document.getElementById('infoUltimoCierre').innerText = "No se encontraron cierres previos registrados.";
-                }
-            } catch (error) {
-                console.error("Error consultando último cierre: ", error);
-            }
-        }
-
-        async function cargarPreciosDesdeFirebase() {
-            const pDoc = await getDoc(doc(db, "config_precios", uidTrabajador));
-            preciosTrabajador = pDoc.exists() ? (pDoc.data().materiales || {}) : {};
-            cargarTablaPreciosVisual();
-            cargarTablaListaMateriales();
-            cargarSelectEdicionPrecios();
-        }
-
-        function cargarTablaListaMateriales() {
-            const tbody = document.getElementById('body-lista-facturacion');
-            tbody.innerHTML = "";
-
-            listaMaterialesBase.forEach((mat, idx) => {
-                const precio = preciosTrabajador[mat] || 0;
-                tbody.innerHTML += `
-                    <tr>
-                        <td style="font-weight:600; font-size:12px;">${mat}</td>
-                        <td style="font-size:12px; color:#666;">₡${precio.toLocaleString('es-CR')}</td>
-                        <td>
-                            <input type="number" step="any" id="kg_${idx}" data-mat="${mat}" data-precio="${precio}" 
-                            placeholder="0.0" oninput="calcularTotalFila(this, 'monto_${idx}')" style="height:32px; padding:4px; font-size:13px;">
-                        </td>
-                        <td>
-                            <input type="text" id="monto_${idx}" class="monto-fila" readonly value="₡0" 
-                            style="height:32px; padding:4px; font-size:13px; font-weight:bold; background:#e2e8f0; border:none;">
-                        </td>
-                    </tr>
-                `;
-            });
-        }
-
-        window.calcularTotalFila = (inputKg, idMonto) => {
-            const kg = parseFloat(inputKg.value) || 0;
-            const precio = parseFloat(inputKg.dataset.precio) || 0;
-            const total = kg * precio;
-            document.getElementById(idMonto).value = "₡" + total.toLocaleString('es-CR');
-            calcularSubtotalLista();
-        };
-
-        function calcularSubtotalLista() {
-            let subtotal = 0;
-            listaMaterialesBase.forEach((mat, idx) => {
-                const inputKg = document.getElementById(`kg_${idx}`);
-                if (inputKg) {
-                    const kg = parseFloat(inputKg.value) || 0;
-                    const precio = parseFloat(inputKg.dataset.precio) || 0;
-                    subtotal += (kg * precio);
-                }
-            });
-            document.getElementById('subtotalFacturaTxt').innerText = subtotal.toLocaleString('es-CR');
-        }
-
-        async function calcularDeudaTotal() {
-            try {
-                const q = query(collection(db, "movimientos_cuenta"), where("sucursal", "==", sucursalActual));
-                const querySnapshot = await getDocs(q);
-                
-                let deudaCalculada = 0;
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    const monto = parseFloat(data.monto) || 0;
-                    if (data.tipo === "Salida_Venta") deudaCalculada += monto; 
-                    else if (data.tipo === "Deposito") deudaCalculada -= monto; 
-                });
-                
-                deudaCalculada += obtenerTotalDepositos();
-
-                document.getElementById('deudaTotalTxt').innerText = deudaCalculada.toLocaleString('es-CR');
-            } catch (error) {
-                console.error("Error calculando la deuda: ", error);
-            }
-        }
-
-        window.login = async () => {
-            try {
-                await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('pass').value);
-            } catch(e) { alert("Error: " + e.message); }
-        };
-
-        window.logout = () => signOut(auth);
-
-        function cargarTablaPreciosVisual() {
-            const tbody = document.getElementById('body-lista-precios');
-            tbody.innerHTML = "";
-            let tienePrecios = false;
-            for (const [material, precio] of Object.entries(preciosTrabajador)) {
-                if (precio > 0) {
-                    tienePrecios = true;
-                    tbody.innerHTML += `<tr><td>${material}</td><td><b>₡${precio.toLocaleString('es-CR')}</b></td></tr>`;
-                }
-            }
-            if(!tienePrecios) {
-                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#999;">No hay precios configurados.</td></tr>`;
-            }
-        }
-
-        function cargarSelectEdicionPrecios() {
-            const selectEdicion = document.getElementById('editMatSelect');
-            selectEdicion.innerHTML = "";
-            listaMaterialesBase.forEach(mat => {
-                selectEdicion.innerHTML += `<option value="${mat}">${mat}</option>`;
-            });
-            actualizarPrecioEnEdicion();
-        }
-
-        window.actualizarPrecioEnEdicion = () => {
-            const mat = document.getElementById('editMatSelect').value;
-            document.getElementById('editMatPrecio').value = preciosTrabajador[mat] || 0;
-        };
-
-        window.guardarPrecioFirebase = async function() {
-            const mat = document.getElementById('editMatSelect').value;
-            const nuevoPrecio = parseFloat(document.getElementById('editMatPrecio').value) || 0;
-            if(nuevoPrecio < 0) return;
-
-            const btn = document.getElementById('btnGuardarPrecio');
-            btn.disabled = true;
-
-            preciosTrabajador[mat] = nuevoPrecio;
-            try {
-                await setDoc(doc(db, "config_precios", uidTrabajador), { materiales: preciosTrabajador }, { merge: true });
-                alert(`✅ Precio actualizado.`);
-                cargarTablaPreciosVisual();
-                cargarTablaListaMateriales();
-            } catch (error) { alert("Error: " + error.message); }
-            finally { btn.disabled = false; btn.innerText = "💾 Guardar Precio"; }
-        };
-
-        window.toggleSeccionPrecios = () => {
-            const div = document.getElementById('seccion-editar-precios');
-            div.style.display = (div.style.display === 'none') ? 'block' : 'none';
-        };
-
-        window.validarCedulaTSE = async function() {
-            const cedulaInput = document.getElementById('cedulaCliente').value.trim();
-            const btn = document.getElementById('btnValidarCed');
-            const cedulaLimpia = cedulaInput.replace(/-/g, '');
-
-            if(!cedulaLimpia) { alert("Ingrese una cédula."); return; }
-            btn.innerText = "⚡..."; btn.disabled = true;
-
-            try {
-                const docRef = doc(db, "clientes", cedulaLimpia);
-                const docSnap = await getDoc(docRef);
-
-                if (docSnap.exists()) {
-                    document.getElementById('nombreCliente').value = docSnap.data().nombre;
-                    document.getElementById('nombreCliente').readOnly = true; 
-                } else {
-                    alert("ℹ️ Cliente nuevo. Por favor, digite el nombre completo manualmente.");
-                    document.getElementById('nombreCliente').value = "";
-                    document.getElementById('nombreCliente').readOnly = false;
-                    document.getElementById('nombreCliente').focus();
-                }
-            } catch (error) { 
-                alert("Error al buscar en la base de datos."); 
-            } finally { 
-                btn.innerText = "🔎"; 
-                btn.disabled = false; 
-            }
-        };
-
-        window.guardarFacturaCompletaCliente = async function() {
-            const cedula = document.getElementById('cedulaCliente').value.trim();
-            const nombre = document.getElementById('nombreCliente').value.trim();
-            let numFactura = document.getElementById('numFacturaCliente').value.trim();
-            const cedulaLimpia = cedula.replace(/-/g, '');
-
-            if (!cedulaLimpia || !nombre || !numFactura) {
-                alert("⚠️ Debe ingresar la Cédula, el Nombre y el Número de Factura.");
-                return;
-            }
-
-            let numFacturaInt = parseInt(numFactura);
-            if (isNaN(numFacturaInt) || numFacturaInt < 1) {
-                alert("⚠️ El número de factura debe ser un número entero positivo.");
-                return;
-            }
-
-            let materialesIngresados = [];
-            listaMaterialesBase.forEach((mat, idx) => {
-                const inputKg = document.getElementById(`kg_${idx}`);
-                if (inputKg) {
-                    const kilos = parseFloat(inputKg.value) || 0;
-                    const precio_u = parseFloat(inputKg.dataset.precio) || 0;
-                    if (kilos > 0) {
-                        materialesIngresados.push({
-                            material: mat,
-                            kilos: kilos,
-                            precio_unitario: precio_u,
-                            total_pago: kilos * precio_u
-                        });
-                    }
-                }
-            });
-
-            if (materialesIngresados.length === 0) {
-                alert("⚠️ Ingrese el pesaje (kg) en al menos un material.");
-                return;
-            }
-
-            // ---- OBTENER FIRMA ----
-            const firmaData = document.getElementById('firmaDataUrl').value || '';
-
-            try {
-                await setDoc(doc(db, "clientes", cedulaLimpia), {
-                    nombre: nombre,
-                    ultima_actualizacion: serverTimestamp()
-                }, { merge: true });
-
-                const docRef = doc(db, "contadores_facturas", sucursalActual);
-                const docSnap = await getDoc(docRef);
-                let ultimoNum = 0;
-                if (docSnap.exists()) {
-                    ultimoNum = docSnap.data().ultimo_numero || 0;
-                }
-                if (numFacturaInt > ultimoNum) {
-                    await setDoc(docRef, {
-                        ultimo_numero: numFacturaInt
-                    }, { merge: true });
-                }
-            } catch (err) {
-                console.error("Error guardando cliente o contador: ", err);
-            }
-
-            let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
-
-            // ---- GUARDAR FACTURA CON FIRMA ----
-            facturasDelDia.push({
-                num_factura: numFactura,
-                cedula: cedulaLimpia,
-                nombre,
-                detalles_materiales: materialesIngresados,
-                total_factura: totalFactura,
-                firma: firmaData   // <--- FIRMA DIGITAL
-            });
-
-            localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
-
-            actualizarTablaGeneralDia();
-            limpiarFormularioFactura();
-            await obtenerSiguienteNumeroFactura();
-            document.getElementById('cedulaCliente').focus();
-        };
-
-        function limpiarFormularioFactura() {
-            document.getElementById('cedulaCliente').value = "";
-            document.getElementById('nombreCliente').value = "";
-            document.getElementById('nombreCliente').readOnly = false;
-            cargarTablaListaMateriales();
-            document.getElementById('subtotalFacturaTxt').innerText = "0";
-            // Limpiar firma
-            limpiarFirma();
-        }
-
-        // --- GESTIÓN DE DEPÓSITOS (AGREGAR PLATA) ---
-        window.agregarDepositoLista = () => {
-            const desc = document.getElementById('depositoDescInput').value.trim();
-            const monto = obtenerNumeroLimpio('depositoMontoInput');
-
-            if (monto <= 0) {
-                alert("⚠️ Ingrese un monto válido para la entrada de dinero.");
-                return;
-            }
-
-            listaDepositosDia.push({ descripcion: desc || "Entrada / Depósito", monto: monto });
-            localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
-
-            document.getElementById('depositoDescInput').value = "";
-            document.getElementById('depositoMontoInput').value = "";
-
-            actualizarTablaDepositos();
-            calcularDeudaTotal();
-        };
-
-        window.eliminarDepositoLista = (index) => {
-            listaDepositosDia.splice(index, 1);
-            localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
-            actualizarTablaDepositos();
-            calcularDeudaTotal();
-        };
-
-        function obtenerTotalDepositos() {
-            return listaDepositosDia.reduce((sum, d) => sum + d.monto, 0);
-        }
-
-        function actualizarTablaDepositos() {
-            const tbody = document.getElementById('body-depositos-lista');
-            tbody.innerHTML = "";
-            let total = 0;
-
-            if (listaDepositosDia.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay dinero extra agregado.</td></tr>`;
-            } else {
-                listaDepositosDia.forEach((dep, idx) => {
-                    total += dep.monto;
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${dep.descripcion}</td>
-                            <td><b>+₡${dep.monto.toLocaleString('es-CR')}</b></td>
-                            <td style="width:40px; text-align:center;"><button onclick="eliminarDepositoLista(${idx})" class="btn-del">x</button></td>
-                        </tr>
-                    `;
-                });
-            }
-
-            document.getElementById('depositosRecibidosTxt').value = "₡" + total.toLocaleString('es-CR');
-            calcularCajaDinamica();
-        }
-
-        // --- GESTIÓN DE GASTOS ---
-        window.agregarGastoLista = () => {
-            const desc = document.getElementById('gastoDescInput').value.trim();
-            const monto = obtenerNumeroLimpio('gastoMontoInput');
-
-            if (!desc || monto <= 0) {
-                alert("⚠️ Ingrese una descripción y un monto válido para el gasto.");
-                return;
-            }
-
-            listaGastosDia.push({ descripcion: desc, monto: monto });
-            localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
-
-            document.getElementById('gastoDescInput').value = "";
-            document.getElementById('gastoMontoInput').value = "";
-
-            actualizarTablaGastos();
-        };
-
-        window.eliminarGastoLista = (index) => {
-            listaGastosDia.splice(index, 1);
-            localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
-            actualizarTablaGastos();
-        };
-
-        function obtenerTotalGastos() {
-            return listaGastosDia.reduce((sum, g) => sum + g.monto, 0);
-        }
-
-        function actualizarTablaGastos() {
-            const tbody = document.getElementById('body-gastos-lista');
-            tbody.innerHTML = "";
-            let total = 0;
-
-            if (listaGastosDia.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay gastos registrados hoy.</td></tr>`;
-            } else {
-                listaGastosDia.forEach((gasto, idx) => {
-                    total += gasto.monto;
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${gasto.descripcion}</td>
-                            <td><b>-₡${gasto.monto.toLocaleString('es-CR')}</b></td>
-                            <td style="width:40px; text-align:center;"><button onclick="eliminarGastoLista(${idx})" class="btn-del">x</button></td>
-                        </tr>
-                    `;
-                });
-            }
-
-            document.getElementById('gastosFact').value = "₡" + total.toLocaleString('es-CR');
-            calcularCajaDinamica();
-        }
-
-        window.formatearInputMoneda = (input) => {
-            let valor = input.value.replace(/\D/g, "");
-            if (valor) input.value = Number(valor).toLocaleString('es-CR');
-            else input.value = "";
-            calcularCajaDinamica();
-        };
-
-        function obtenerNumeroLimpio(idElemento) {
-            const inputElement = document.getElementById(idElemento);
-            if (!inputElement || !inputElement.value) return 0;
-            const textoLimpio = inputElement.value.replace(/[\s.,₡]/g, "");
-            return parseFloat(textoLimpio) || 0;
-        }
-
-        // --- LÓGICA PRINCIPAL: CALCULAR Y TRANSMITIR CAJA EN TIEMPO REAL ---
-        window.calcularCajaDinamica = () => {
-            const inicioBase = obtenerNumeroLimpio('cajaInicioBase');
-            const ventas = obtenerNumeroLimpio('ventas');
-            const depositosPlata = obtenerTotalDepositos();
-            const pagoFacturas = totalAcumuladoComprasDia; 
-            const gastosFact = obtenerTotalGastos();
-
-            const disponibleCaja = (inicioBase + depositosPlata + ventas) - (pagoFacturas + gastosFact);
-
-            document.getElementById('cajaDisponibleActual').value = "₡" + disponibleCaja.toLocaleString('es-CR');
-            document.getElementById('cierreMano').value = "₡" + disponibleCaja.toLocaleString('es-CR');
-
-            localStorage.setItem(`cajaInicioBase_${sucursalActual}`, document.getElementById('cajaInicioBase').value);
-            localStorage.setItem(`ventas_${sucursalActual}`, document.getElementById('ventas').value);
-
-            actualizarCajaFirestore(disponibleCaja);
-        };
-
-        async function actualizarCajaFirestore(disponible) {
-            if (!sucursalActual || sucursalActual === "Desconocida") return;
-            try {
-                await setDoc(doc(db, "cajas_en_vivo", sucursalActual), {
-                    sucursal: sucursalActual,
-                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
-                    depositos: obtenerTotalDepositos(),
-                    ventas: obtenerNumeroLimpio('ventas'),
-                    compras_facturas: totalAcumuladoComprasDia,
-                    gastos: obtenerTotalGastos(),
-                    caja_disponible: disponible,
-                    ultima_actualizacion: serverTimestamp()
-                }, { merge: true });
-            } catch (e) {
-                console.error("Error sincronizando caja en vivo:", e);
-            }
-        }
-
-        function actualizarTablaGeneralDia() {
-            const tbody = document.getElementById('body-facturas-agregadas');
-            tbody.innerHTML = "";
-            totalAcumuladoComprasDia = 0;
-
-            let acumuladoMateriales = {};
-
-            if (facturasDelDia.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999;">No hay facturas guardadas todavía.</td></tr>`;
-            } else {
-                facturasDelDia.forEach((fact, index) => {
-                    const montoFactura = parseFloat(fact.total_factura) || 0;
-                    totalAcumuladoComprasDia += montoFactura;
-                    let resumenMats = fact.detalles_materiales.map(m => `${m.material} (${m.kilos}kg)`).join(', ');
-
-                    tbody.innerHTML += `
-                        <tr>
-                            <td><b>Fact: #${fact.num_factura}</b></td>
-                            <td><b>${fact.nombre}</b><br><small style="color:#555">${fact.cedula}</small></td>
-                            <td style="max-width: 250px; font-size:11px; color:#444;">${resumenMats}</td>
-                            <td><b>₡${montoFactura.toLocaleString('es-CR')}</b></td>
-                            <td style="display: flex; gap: 4px; flex-wrap: wrap;">
-                                <button onclick="imprimirFactura(${index})" class="btn-print" style="background:#2b6cb0; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">🖨️</button>
-                                <button onclick="eliminarFacturaGeneral(${index})" class="btn-del" style="background:#ff5252; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">x</button>
-                            </td>
-                        </tr>
-                    `;
-
-                    fact.detalles_materiales.forEach(m => {
-                        if (!acumuladoMateriales[m.material]) {
-                            acumuladoMateriales[m.material] = { kilos: 0, costo: 0 };
-                        }
-                        acumuladoMateriales[m.material].kilos += m.kilos;
-                        acumuladoMateriales[m.material].costo += (parseFloat(m.total_pago) || 0);
-                    });
-                });
-            }
-
-            document.getElementById('totalFacturasTxt').innerText = totalAcumuladoComprasDia.toLocaleString('es-CR');
-            document.getElementById('pagoMat').value = "₡" + totalAcumuladoComprasDia.toLocaleString('es-CR');
-
-            calcularCajaDinamica();
-            renderizarTablaAcumuladosDia(acumuladoMateriales);
-        }
-
-        window.eliminarFacturaGeneral = (index) => {
-            facturasDelDia.splice(index, 1);
-            localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
-            actualizarTablaGeneralDia();
-        };
-
-        // --- IMPRESIÓN CON FIRMA ---
-        window.imprimirFactura = (index) => {
-            const fact = facturasDelDia[index];
-            if (!fact) return;
-
-            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
-            const detalles = fact.detalles_materiales.map(m => 
-                `<tr><td>${m.material}</td><td>${m.kilos} kg</td><td>₡${m.precio_unitario.toLocaleString('es-CR')}</td><td>₡${m.total_pago.toLocaleString('es-CR')}</td></tr>`
-            ).join('');
-
-            // Incluir firma si existe
-            const firmaHTML = fact.firma ? 
-                `<div style="text-align:center; margin-top:20px;"><b>Firma del Cliente</b><br><img src="${fact.firma}" style="max-width:150px; max-height:60px;"></div>` : '';
-
-            const contenido = `
-                <html>
-                <head><title>Factura #${fact.num_factura}</title>
-                <style>
-                    @page { margin: 5mm; size: 80mm auto; }
-                    body { font-family: Arial, sans-serif; font-size: 12px; max-width: 72mm; margin: 0 auto; padding: 0; }
-                    h2 { text-align: center; font-size: 14px; margin: 5px 0; }
-                    .info { font-size: 11px; margin-bottom: 10px; }
-                    .info p { margin: 2px 0; }
-                    table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11px; }
-                    th { background: #eee; text-align: left; padding: 4px; border-bottom: 1px solid #999; }
-                    td { padding: 4px; border-bottom: 1px solid #ddd; }
-                    .total { font-weight: bold; font-size: 13px; text-align: right; margin-top: 10px; border-top: 2px solid #333; padding-top: 5px; }
-                    .footer { margin-top: 15px; font-size: 10px; color: #555; text-align: center; }
-                </style>
-                </head>
-                <body>
-                    <h2>📍 ${sucursalActual}</h2>
-                    <h2>FACTURA #${fact.num_factura}</h2>
-                    <div class="info">
-                        <p><b>Fecha:</b> ${fecha}</p>
-                        <p><b>Cliente:</b> ${fact.nombre}</p>
-                        <p><b>Cédula:</b> ${fact.cedula}</p>
-                    </div>
-                    <table>
-                        <thead><tr><th>Material</th><th>Kg</th><th>₡/Kg</th><th>Total</th></tr></thead>
-                        <tbody>${detalles}</tbody>
-                    </table>
-                    <div class="total">Total: ₡${fact.total_factura.toLocaleString('es-CR')}</div>
-                    ${firmaHTML}
-                    <div class="footer">Gracias por su visita</div>
-                </body>
-                </html>
-            `;
-
-            const ventana = window.open('', '_blank', 'width=800,height=600');
-            if (ventana) {
-                ventana.document.write(contenido);
-                ventana.document.close();
-                ventana.focus();
-                setTimeout(() => ventana.print(), 500);
-            } else {
-                alert('Por favor, permita ventanas emergentes para imprimir.');
-            }
-        };
-
-        window.enviarTodoFirebase = async function() {
-            if (facturasDelDia.length === 0) {
-                alert("❌ No hay facturas registradas hoy para cerrar.");
-                return;
-            }
-            if(!confirm("¿Desea enviar el cierre total y las facturas al sistema?")) return;
-
-            const btn = document.getElementById('btnEnviarTodo');
-            btn.disabled = true; btn.innerText = "Subiendo Datos...";
-
-            const fecha = document.getElementById('fecha').value;
-
-            try {
-                const batch = writeBatch(db);
-
-                const cierreRef = doc(collection(db, "revisiones_faltantes")); 
-                batch.set(cierreRef, {
-                    uid_trabajador: uidTrabajador, sucursal: sucursalActual, fecha,
-                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
-                    total_ventas: obtenerNumeroLimpio('ventas'),
-                    total_depositos: obtenerTotalDepositos(),
-                    detalles_depositos: listaDepositosDia,
-                    pago_materiales: totalAcumuladoComprasDia,
-                    gastos_facturas: obtenerTotalGastos(),
-                    cierre_mano: obtenerNumeroLimpio('cierreMano'),
-                    estado: "Pendiente", timestamp: serverTimestamp()
-                });
-
-                facturasDelDia.forEach((factura) => {
-                    const factRef = doc(collection(db, "facturas_compras"));
-                    batch.set(factRef, {
-                        ...factura,
-                        cierre_id: cierreRef.id,
-                        sucursal: sucursalActual, fecha, uid_trabajador: uidTrabajador,
-                        timestamp: serverTimestamp()
-                    });
-                });
-
-                await batch.commit();
-                
-                localStorage.removeItem(`facturas_${sucursalActual}`);
-                localStorage.removeItem(`gastos_${sucursalActual}`);
-                localStorage.removeItem(`depositos_${sucursalActual}`);
-                localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
-                localStorage.removeItem(`ventas_${sucursalActual}`);
-
-                alert("✅ Cierre guardado con éxito.");
-                location.reload();
-            } catch (e) {
-                alert("Error: " + e.message);
-                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA";
-            }
-        };
-
-        window.guardarMovimientoCuenta = async function() {
-            const tipo = document.getElementById('tipoMovimiento').value;
-            const monto = obtenerNumeroLimpio('montoMovimiento');
-            const fechaMov = document.getElementById('fechaMovimiento').value;
-            const motivo = document.getElementById('motivoMovimiento').value.trim();
-
-            if(!monto || monto <= 0 || !fechaMov) {
-                alert("⚠️ Por favor asigne una fecha y un monto válido.");
-                return;
-            }
-
-            const btn = document.getElementById('btnGuardarMov');
-            btn.disabled = true; btn.innerText = "Guardando...";
-
-            try {
-                await addDoc(collection(db, "movimientos_cuenta"), {
-                    uid_trabajador: uidTrabajador,
-                    sucursal: sucursalActual, 
-                    tipo: tipo, 
-                    monto: monto,
-                    fecha_operacion: fechaMov,
-                    motivo: motivo || "Sin especificación",
-                    timestamp: serverTimestamp()
-                });
-
-                alert(`✅ ${tipo} registrado correctamente.`);
-                document.getElementById('montoMovimiento').value = "";
-                document.getElementById('motivoMovimiento').value = "";
-                await calcularDeudaTotal(); 
-            } catch (error) {
-                alert("Error: " + error.message);
-            } finally {
-                btn.disabled = false; btn.innerText = "Registrar en Cuenta Externa";
-            }
-        };
-
-        function renderizarTablaAcumuladosDia(acumulado) {
-            const tbody = document.getElementById('body-materiales-totales-dia');
-            tbody.innerHTML = "";
-
-            if (Object.keys(acumulado).length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">Sin movimientos en el día.</td></tr>`;
-                return;
-            }
-
-            for (const [material, datos] of Object.entries(acumulado)) {
-                tbody.innerHTML += `
-                    <tr>
-                        <td><b>${material}</b></td>
-                        <td style="color:#1a73e8; font-weight:bold;">${datos.kilos.toFixed(1)} kg</td>
-                        <td><b>₡${datos.costo.toLocaleString('es-CR')}</b></td>
-                    </tr>
-                `;
-            }
-        }
-    </script>
+    <!-- Librería para generar PDF desde HTML -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
+        /* Estilos existentes */
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; background: #f0f2f5; margin: 0; color: #333; }
         .login-box { background: white; padding: 25px; max-width: 400px; margin: 60px auto; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; box-sizing: border-box; }
         .login-box input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
@@ -882,13 +38,153 @@
         .scroll-precios { max-height: 300px; overflow-y: auto; margin-bottom: 12px; border-radius: 8px; }
         .box-ultimo-cierre { background: #edf2f7; border-left: 4px solid #3182ce; padding: 10px 14px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #2d3748; }
         .btn-print { background: #2b6cb0; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
-        /* Estilos para firma */
         #firmaCanvas { border: 1px solid #ccc; border-radius: 8px; background: white; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
         @media(max-width: 850px) {
             .grid-layout { grid-template-columns: 1fr; gap: 16px; }
             body { padding: 8px; }
             .card, .panel-lateral { padding: 12px; border-radius: 12px; }
             .seccion-interna { padding: 10px; border-radius: 10px; }
+        }
+        /* ===== ESTILOS PARA EL PDF (factura bonita) ===== */
+        .factura-pdf {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 10mm 12mm;
+            background: #ffffff;
+            color: #1e293b;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        }
+        .factura-pdf .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #1e3a8a;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+        }
+        .factura-pdf .header .empresa {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e3a8a;
+            letter-spacing: 1px;
+        }
+        .factura-pdf .header .sucursal {
+            font-size: 14px;
+            color: #475569;
+            background: #f1f5f9;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        .factura-pdf .titulo-factura {
+            text-align: center;
+            font-size: 28px;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 10px 0 20px 0;
+            letter-spacing: 2px;
+        }
+        .factura-pdf .info-cliente {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            background: #f8fafc;
+            padding: 14px 18px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            border: 1px solid #e2e8f0;
+        }
+        .factura-pdf .info-cliente p {
+            margin: 4px 0;
+            font-size: 14px;
+        }
+        .factura-pdf .info-cliente .label {
+            font-weight: 600;
+            color: #475569;
+        }
+        .factura-pdf .info-cliente .valor {
+            font-weight: 500;
+            color: #0f172a;
+        }
+        .factura-pdf table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 18px 0;
+            font-size: 14px;
+        }
+        .factura-pdf table th {
+            background: #1e3a8a;
+            color: white;
+            font-weight: 600;
+            text-align: left;
+            padding: 10px 12px;
+            border: none;
+        }
+        .factura-pdf table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .factura-pdf table tbody tr:nth-child(even) {
+            background: #f8fafc;
+        }
+        .factura-pdf table tbody tr:hover {
+            background: #eef2ff;
+        }
+        .factura-pdf .total {
+            display: flex;
+            justify-content: flex-end;
+            font-size: 20px;
+            font-weight: 700;
+            color: #1e3a8a;
+            border-top: 3px solid #1e3a8a;
+            padding-top: 12px;
+            margin-top: 10px;
+        }
+        .factura-pdf .total span {
+            background: #dbeafe;
+            padding: 6px 24px;
+            border-radius: 8px;
+        }
+        .factura-pdf .firma {
+            text-align: center;
+            margin: 30px 0 20px 0;
+            padding: 16px;
+            border: 2px dashed #94a3b8;
+            border-radius: 16px;
+            background: #f8fafc;
+        }
+        .factura-pdf .firma img {
+            max-width: 220px;
+            max-height: 80px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 4px;
+            background: white;
+        }
+        .factura-pdf .footer {
+            text-align: center;
+            font-size: 13px;
+            color: #64748b;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 16px;
+            margin-top: 20px;
+        }
+        .factura-pdf .footer strong {
+            color: #1e3a8a;
+        }
+        /* Para que ocupe toda la hoja A4 */
+        @page {
+            margin: 0;
+            size: A4;
+        }
+        @media print {
+            .factura-pdf {
+                border: none;
+                box-shadow: none;
+                padding: 8mm 10mm;
+            }
         }
     </style>
 </head>
@@ -1153,5 +449,886 @@
 
     </div>
 
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, writeBatch, serverTimestamp, query, where, getDocs, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCi409CkmXBbun7-POejbVaIiThK2nZ1JY",
+            authDomain: "prestamos-18dd8.firebaseapp.com",
+            projectId: "prestamos-18dd8",
+            storageBucket: "prestamos-18dd8.firebasestorage.app",
+            messagingSenderId: "921713515466",
+            appId: "1:921713515466:web:0e2bcb5d67067068570d33"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        const listaMaterialesBase = [
+            "ACERO INOXIDABLE", "ALUMINIO", "BATERIA CARRO", "BRONCE", "CARTON", 
+            "CATALIZADOR", "CHATARRA", "COBRE", "GALONES", "PET", "TETRABRIK", 
+            "TARJETA", "LAVADORAS", "MOTORES", "LATAS ALUMINIO", "PAPEL REVUELTO", 
+            "PAPEL BLANCO", "PAPEL COLOR", "PERIODICO", "RADIADOR Cobre Bronce", 
+            "RADIADOR Cobre Aluminio", "RADIADOR ALUMINIO", "CAJA PLASTICA", 
+            "BOLSA TRANSPAR.", "BOLSA COLOR", "VIDRIO", "CABLE ELECTRICO", "OTROS"
+        ];
+
+        let preciosTrabajador = {};
+        let facturasDelDia = []; 
+        let listaGastosDia = []; 
+        let listaDepositosDia = []; 
+        let uidTrabajador = null;
+        let totalAcumuladoComprasDia = 0;
+        let sucursalActual = "Desconocida";
+
+        // ---- FIRMA DIGITAL ----
+        let canvas, ctx, isDrawing = false, lastX = 0, lastY = 0;
+
+        function initFirma() {
+            canvas = document.getElementById('firmaCanvas');
+            if (!canvas) return;
+            ctx = canvas.getContext('2d');
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            canvas.addEventListener('touchstart', startDrawing);
+            canvas.addEventListener('touchmove', draw);
+            canvas.addEventListener('touchend', stopDrawing);
+
+            document.getElementById('limpiarFirmaBtn')?.addEventListener('click', limpiarFirma);
+            document.getElementById('guardarFirmaBtn')?.addEventListener('click', guardarFirma);
+        }
+
+        function resizeCanvas() {
+            if (!canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = (rect.width * 0.4) * 2;
+            ctx.scale(2, 2);
+        }
+
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+                e.preventDefault();
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            return {
+                x: (clientX - rect.left) * (canvas.width / (rect.width * 2)),
+                y: (clientY - rect.top) * (canvas.height / (rect.height * 2))
+            };
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const pos = getPos(e);
+            lastX = pos.x;
+            lastY = pos.y;
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#000';
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+            lastX = pos.x;
+            lastY = pos.y;
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function limpiarFirma() {
+            if (!ctx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            document.getElementById('firmaDataUrl').value = '';
+        }
+
+        function guardarFirma() {
+            const dataUrl = canvas.toDataURL('image/png');
+            document.getElementById('firmaDataUrl').value = dataUrl;
+            alert('✅ Firma guardada correctamente.');
+        }
+
+        // ---- FIN FIRMA ----
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                uidTrabajador = user.uid;
+                const emailUsuario = user.email ? user.email.toLowerCase().trim() : "";
+
+                if (emailUsuario.includes("perez")) {
+                    sucursalActual = "Perez";
+                } else if (emailUsuario.includes("paraiso")) { 
+                    sucursalActual = "Paraiso";
+                } else if (emailUsuario.includes("cartago")) {
+                    sucursalActual = "Cartago";
+                } else {
+                    sucursalActual = "Desconocida";
+                }
+
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('modulo-principal').style.display = 'grid';
+                document.getElementById('sucursal-txt').innerText = sucursalActual;
+                
+                const facturasGuardadas = localStorage.getItem(`facturas_${sucursalActual}`);
+                if (facturasGuardadas) facturasDelDia = JSON.parse(facturasGuardadas);
+
+                const gastosGuardados = localStorage.getItem(`gastos_${sucursalActual}`);
+                if (gastosGuardados) listaGastosDia = JSON.parse(gastosGuardados);
+
+                const depositosGuardados = localStorage.getItem(`depositos_${sucursalActual}`);
+                if (depositosGuardados) listaDepositosDia = JSON.parse(depositosGuardados);
+
+                document.getElementById('cajaInicioBase').value = localStorage.getItem(`cajaInicioBase_${sucursalActual}`) || "";
+                document.getElementById('ventas').value = localStorage.getItem(`ventas_${sucursalActual}`) || "";
+
+                await cargarPreciosDesdeFirebase();
+                await calcularDeudaTotal();
+                await cargarUltimoCierre();
+                await obtenerSiguienteNumeroFactura();
+                actualizarTablaGeneralDia(); 
+                actualizarTablaGastos();
+                actualizarTablaDepositos();
+
+                setTimeout(initFirma, 100);
+            } else {
+                document.getElementById('login-section').style.display = 'block';
+                document.getElementById('modulo-principal').style.display = 'none';
+            }
+        });
+
+        async function obtenerSiguienteNumeroFactura() {
+            try {
+                const docRef = doc(db, "contadores_facturas", sucursalActual);
+                const docSnap = await getDoc(docRef);
+                let siguienteNum = 1;
+
+                if (docSnap.exists()) {
+                    siguienteNum = (docSnap.data().ultimo_numero || 0) + 1;
+                }
+                document.getElementById('numFacturaCliente').value = siguienteNum;
+            } catch (error) {
+                console.error("Error al obtener número de factura:", error);
+            }
+        }
+
+        async function cargarUltimoCierre() {
+            try {
+                const q = query(
+                    collection(db, "revisiones_faltantes"),
+                    where("sucursal", "==", sucursalActual),
+                    orderBy("timestamp", "desc"),
+                    limit(1)
+                );
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    const datos = snap.docs[0].data();
+                    const inicio = parseFloat(datos.caja_inicio) || 0;
+                    const cierre = parseFloat(datos.cierre_mano) || 0;
+
+                    document.getElementById('infoUltimoCierre').innerHTML = `
+                        <b>📥 Dinero Base Inicial:</b> ₡${inicio.toLocaleString('es-CR')} | 
+                        <b>📤 Disponible al Cierre:</b> ₡${cierre.toLocaleString('es-CR')} 
+                        <small style="color:#718096;">(${datos.fecha || ''})</small>
+                    `;
+                } else {
+                    document.getElementById('infoUltimoCierre').innerText = "No se encontraron cierres previos registrados.";
+                }
+            } catch (error) {
+                console.error("Error consultando último cierre: ", error);
+            }
+        }
+
+        async function cargarPreciosDesdeFirebase() {
+            const pDoc = await getDoc(doc(db, "config_precios", uidTrabajador));
+            preciosTrabajador = pDoc.exists() ? (pDoc.data().materiales || {}) : {};
+            cargarTablaPreciosVisual();
+            cargarTablaListaMateriales();
+            cargarSelectEdicionPrecios();
+        }
+
+        function cargarTablaListaMateriales() {
+            const tbody = document.getElementById('body-lista-facturacion');
+            tbody.innerHTML = "";
+
+            listaMaterialesBase.forEach((mat, idx) => {
+                const precio = preciosTrabajador[mat] || 0;
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="font-weight:600; font-size:12px;">${mat}</td>
+                        <td style="font-size:12px; color:#666;">₡${precio.toLocaleString('es-CR')}</td>
+                        <td>
+                            <input type="number" step="any" id="kg_${idx}" data-mat="${mat}" data-precio="${precio}" 
+                            placeholder="0.0" oninput="calcularTotalFila(this, 'monto_${idx}')" style="height:32px; padding:4px; font-size:13px;">
+                        </td>
+                        <td>
+                            <input type="text" id="monto_${idx}" class="monto-fila" readonly value="₡0" 
+                            style="height:32px; padding:4px; font-size:13px; font-weight:bold; background:#e2e8f0; border:none;">
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        window.calcularTotalFila = (inputKg, idMonto) => {
+            const kg = parseFloat(inputKg.value) || 0;
+            const precio = parseFloat(inputKg.dataset.precio) || 0;
+            const total = kg * precio;
+            document.getElementById(idMonto).value = "₡" + total.toLocaleString('es-CR');
+            calcularSubtotalLista();
+        };
+
+        function calcularSubtotalLista() {
+            let subtotal = 0;
+            listaMaterialesBase.forEach((mat, idx) => {
+                const inputKg = document.getElementById(`kg_${idx}`);
+                if (inputKg) {
+                    const kg = parseFloat(inputKg.value) || 0;
+                    const precio = parseFloat(inputKg.dataset.precio) || 0;
+                    subtotal += (kg * precio);
+                }
+            });
+            document.getElementById('subtotalFacturaTxt').innerText = subtotal.toLocaleString('es-CR');
+        }
+
+        async function calcularDeudaTotal() {
+            try {
+                const q = query(collection(db, "movimientos_cuenta"), where("sucursal", "==", sucursalActual));
+                const querySnapshot = await getDocs(q);
+                
+                let deudaCalculada = 0;
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const monto = parseFloat(data.monto) || 0;
+                    if (data.tipo === "Salida_Venta") deudaCalculada += monto; 
+                    else if (data.tipo === "Deposito") deudaCalculada -= monto; 
+                });
+                
+                deudaCalculada += obtenerTotalDepositos();
+
+                document.getElementById('deudaTotalTxt').innerText = deudaCalculada.toLocaleString('es-CR');
+            } catch (error) {
+                console.error("Error calculando la deuda: ", error);
+            }
+        }
+
+        window.login = async () => {
+            try {
+                await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('pass').value);
+            } catch(e) { alert("Error: " + e.message); }
+        };
+
+        window.logout = () => signOut(auth);
+
+        function cargarTablaPreciosVisual() {
+            const tbody = document.getElementById('body-lista-precios');
+            tbody.innerHTML = "";
+            let tienePrecios = false;
+            for (const [material, precio] of Object.entries(preciosTrabajador)) {
+                if (precio > 0) {
+                    tienePrecios = true;
+                    tbody.innerHTML += `<tr><td>${material}</td><td><b>₡${precio.toLocaleString('es-CR')}</b></td></tr>`;
+                }
+            }
+            if(!tienePrecios) {
+                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#999;">No hay precios configurados.</td></tr>`;
+            }
+        }
+
+        function cargarSelectEdicionPrecios() {
+            const selectEdicion = document.getElementById('editMatSelect');
+            selectEdicion.innerHTML = "";
+            listaMaterialesBase.forEach(mat => {
+                selectEdicion.innerHTML += `<option value="${mat}">${mat}</option>`;
+            });
+            actualizarPrecioEnEdicion();
+        }
+
+        window.actualizarPrecioEnEdicion = () => {
+            const mat = document.getElementById('editMatSelect').value;
+            document.getElementById('editMatPrecio').value = preciosTrabajador[mat] || 0;
+        };
+
+        window.guardarPrecioFirebase = async function() {
+            const mat = document.getElementById('editMatSelect').value;
+            const nuevoPrecio = parseFloat(document.getElementById('editMatPrecio').value) || 0;
+            if(nuevoPrecio < 0) return;
+
+            const btn = document.getElementById('btnGuardarPrecio');
+            btn.disabled = true;
+
+            preciosTrabajador[mat] = nuevoPrecio;
+            try {
+                await setDoc(doc(db, "config_precios", uidTrabajador), { materiales: preciosTrabajador }, { merge: true });
+                alert(`✅ Precio actualizado.`);
+                cargarTablaPreciosVisual();
+                cargarTablaListaMateriales();
+            } catch (error) { alert("Error: " + error.message); }
+            finally { btn.disabled = false; btn.innerText = "💾 Guardar Precio"; }
+        };
+
+        window.toggleSeccionPrecios = () => {
+            const div = document.getElementById('seccion-editar-precios');
+            div.style.display = (div.style.display === 'none') ? 'block' : 'none';
+        };
+
+        window.validarCedulaTSE = async function() {
+            const cedulaInput = document.getElementById('cedulaCliente').value.trim();
+            const btn = document.getElementById('btnValidarCed');
+            const cedulaLimpia = cedulaInput.replace(/-/g, '');
+
+            if(!cedulaLimpia) { alert("Ingrese una cédula."); return; }
+            btn.innerText = "⚡..."; btn.disabled = true;
+
+            try {
+                const docRef = doc(db, "clientes", cedulaLimpia);
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    document.getElementById('nombreCliente').value = docSnap.data().nombre;
+                    document.getElementById('nombreCliente').readOnly = true; 
+                } else {
+                    alert("ℹ️ Cliente nuevo. Por favor, digite el nombre completo manualmente.");
+                    document.getElementById('nombreCliente').value = "";
+                    document.getElementById('nombreCliente').readOnly = false;
+                    document.getElementById('nombreCliente').focus();
+                }
+            } catch (error) { 
+                alert("Error al buscar en la base de datos."); 
+            } finally { 
+                btn.innerText = "🔎"; 
+                btn.disabled = false; 
+            }
+        };
+
+        window.guardarFacturaCompletaCliente = async function() {
+            const cedula = document.getElementById('cedulaCliente').value.trim();
+            const nombre = document.getElementById('nombreCliente').value.trim();
+            let numFactura = document.getElementById('numFacturaCliente').value.trim();
+            const cedulaLimpia = cedula.replace(/-/g, '');
+
+            if (!cedulaLimpia || !nombre || !numFactura) {
+                alert("⚠️ Debe ingresar la Cédula, el Nombre y el Número de Factura.");
+                return;
+            }
+
+            let numFacturaInt = parseInt(numFactura);
+            if (isNaN(numFacturaInt) || numFacturaInt < 1) {
+                alert("⚠️ El número de factura debe ser un número entero positivo.");
+                return;
+            }
+
+            let materialesIngresados = [];
+            listaMaterialesBase.forEach((mat, idx) => {
+                const inputKg = document.getElementById(`kg_${idx}`);
+                if (inputKg) {
+                    const kilos = parseFloat(inputKg.value) || 0;
+                    const precio_u = parseFloat(inputKg.dataset.precio) || 0;
+                    if (kilos > 0) {
+                        materialesIngresados.push({
+                            material: mat,
+                            kilos: kilos,
+                            precio_unitario: precio_u,
+                            total_pago: kilos * precio_u
+                        });
+                    }
+                }
+            });
+
+            if (materialesIngresados.length === 0) {
+                alert("⚠️ Ingrese el pesaje (kg) en al menos un material.");
+                return;
+            }
+
+            const firmaData = document.getElementById('firmaDataUrl').value || '';
+
+            try {
+                await setDoc(doc(db, "clientes", cedulaLimpia), {
+                    nombre: nombre,
+                    ultima_actualizacion: serverTimestamp()
+                }, { merge: true });
+
+                const docRef = doc(db, "contadores_facturas", sucursalActual);
+                const docSnap = await getDoc(docRef);
+                let ultimoNum = 0;
+                if (docSnap.exists()) {
+                    ultimoNum = docSnap.data().ultimo_numero || 0;
+                }
+                if (numFacturaInt > ultimoNum) {
+                    await setDoc(docRef, {
+                        ultimo_numero: numFacturaInt
+                    }, { merge: true });
+                }
+            } catch (err) {
+                console.error("Error guardando cliente o contador: ", err);
+            }
+
+            let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
+
+            facturasDelDia.push({
+                num_factura: numFactura,
+                cedula: cedulaLimpia,
+                nombre,
+                detalles_materiales: materialesIngresados,
+                total_factura: totalFactura,
+                firma: firmaData
+            });
+
+            localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+
+            actualizarTablaGeneralDia();
+            limpiarFormularioFactura();
+            await obtenerSiguienteNumeroFactura();
+            document.getElementById('cedulaCliente').focus();
+        };
+
+        function limpiarFormularioFactura() {
+            document.getElementById('cedulaCliente').value = "";
+            document.getElementById('nombreCliente').value = "";
+            document.getElementById('nombreCliente').readOnly = false;
+            cargarTablaListaMateriales();
+            document.getElementById('subtotalFacturaTxt').innerText = "0";
+            limpiarFirma();
+        }
+
+        // --- GESTIÓN DE DEPÓSITOS ---
+        window.agregarDepositoLista = () => {
+            const desc = document.getElementById('depositoDescInput').value.trim();
+            const monto = obtenerNumeroLimpio('depositoMontoInput');
+
+            if (monto <= 0) {
+                alert("⚠️ Ingrese un monto válido para la entrada de dinero.");
+                return;
+            }
+
+            listaDepositosDia.push({ descripcion: desc || "Entrada / Depósito", monto: monto });
+            localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
+
+            document.getElementById('depositoDescInput').value = "";
+            document.getElementById('depositoMontoInput').value = "";
+
+            actualizarTablaDepositos();
+            calcularDeudaTotal();
+        };
+
+        window.eliminarDepositoLista = (index) => {
+            listaDepositosDia.splice(index, 1);
+            localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
+            actualizarTablaDepositos();
+            calcularDeudaTotal();
+        };
+
+        function obtenerTotalDepositos() {
+            return listaDepositosDia.reduce((sum, d) => sum + d.monto, 0);
+        }
+
+        function actualizarTablaDepositos() {
+            const tbody = document.getElementById('body-depositos-lista');
+            tbody.innerHTML = "";
+            let total = 0;
+
+            if (listaDepositosDia.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay dinero extra agregado.</td></tr>`;
+            } else {
+                listaDepositosDia.forEach((dep, idx) => {
+                    total += dep.monto;
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${dep.descripcion}</td>
+                            <td><b>+₡${dep.monto.toLocaleString('es-CR')}</b></td>
+                            <td style="width:40px; text-align:center;"><button onclick="eliminarDepositoLista(${idx})" class="btn-del">x</button></td>
+                        </tr>
+                    `;
+                });
+            }
+
+            document.getElementById('depositosRecibidosTxt').value = "₡" + total.toLocaleString('es-CR');
+            calcularCajaDinamica();
+        }
+
+        // --- GESTIÓN DE GASTOS ---
+        window.agregarGastoLista = () => {
+            const desc = document.getElementById('gastoDescInput').value.trim();
+            const monto = obtenerNumeroLimpio('gastoMontoInput');
+
+            if (!desc || monto <= 0) {
+                alert("⚠️ Ingrese una descripción y un monto válido para el gasto.");
+                return;
+            }
+
+            listaGastosDia.push({ descripcion: desc, monto: monto });
+            localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
+
+            document.getElementById('gastoDescInput').value = "";
+            document.getElementById('gastoMontoInput').value = "";
+
+            actualizarTablaGastos();
+        };
+
+        window.eliminarGastoLista = (index) => {
+            listaGastosDia.splice(index, 1);
+            localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
+            actualizarTablaGastos();
+        };
+
+        function obtenerTotalGastos() {
+            return listaGastosDia.reduce((sum, g) => sum + g.monto, 0);
+        }
+
+        function actualizarTablaGastos() {
+            const tbody = document.getElementById('body-gastos-lista');
+            tbody.innerHTML = "";
+            let total = 0;
+
+            if (listaGastosDia.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay gastos registrados hoy.</td></tr>`;
+            } else {
+                listaGastosDia.forEach((gasto, idx) => {
+                    total += gasto.monto;
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${gasto.descripcion}</td>
+                            <td><b>-₡${gasto.monto.toLocaleString('es-CR')}</b></td>
+                            <td style="width:40px; text-align:center;"><button onclick="eliminarGastoLista(${idx})" class="btn-del">x</button></td>
+                        </tr>
+                    `;
+                });
+            }
+
+            document.getElementById('gastosFact').value = "₡" + total.toLocaleString('es-CR');
+            calcularCajaDinamica();
+        }
+
+        window.formatearInputMoneda = (input) => {
+            let valor = input.value.replace(/\D/g, "");
+            if (valor) input.value = Number(valor).toLocaleString('es-CR');
+            else input.value = "";
+            calcularCajaDinamica();
+        };
+
+        function obtenerNumeroLimpio(idElemento) {
+            const inputElement = document.getElementById(idElemento);
+            if (!inputElement || !inputElement.value) return 0;
+            const textoLimpio = inputElement.value.replace(/[\s.,₡]/g, "");
+            return parseFloat(textoLimpio) || 0;
+        }
+
+        // --- LÓGICA PRINCIPAL: CALCULAR Y TRANSMITIR CAJA EN TIEMPO REAL ---
+        window.calcularCajaDinamica = () => {
+            const inicioBase = obtenerNumeroLimpio('cajaInicioBase');
+            const ventas = obtenerNumeroLimpio('ventas');
+            const depositosPlata = obtenerTotalDepositos();
+            const pagoFacturas = totalAcumuladoComprasDia; 
+            const gastosFact = obtenerTotalGastos();
+
+            const disponibleCaja = (inicioBase + depositosPlata + ventas) - (pagoFacturas + gastosFact);
+
+            document.getElementById('cajaDisponibleActual').value = "₡" + disponibleCaja.toLocaleString('es-CR');
+            document.getElementById('cierreMano').value = "₡" + disponibleCaja.toLocaleString('es-CR');
+
+            localStorage.setItem(`cajaInicioBase_${sucursalActual}`, document.getElementById('cajaInicioBase').value);
+            localStorage.setItem(`ventas_${sucursalActual}`, document.getElementById('ventas').value);
+
+            actualizarCajaFirestore(disponibleCaja);
+        };
+
+        async function actualizarCajaFirestore(disponible) {
+            if (!sucursalActual || sucursalActual === "Desconocida") return;
+            try {
+                await setDoc(doc(db, "cajas_en_vivo", sucursalActual), {
+                    sucursal: sucursalActual,
+                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
+                    depositos: obtenerTotalDepositos(),
+                    ventas: obtenerNumeroLimpio('ventas'),
+                    compras_facturas: totalAcumuladoComprasDia,
+                    gastos: obtenerTotalGastos(),
+                    caja_disponible: disponible,
+                    ultima_actualizacion: serverTimestamp()
+                }, { merge: true });
+            } catch (e) {
+                console.error("Error sincronizando caja en vivo:", e);
+            }
+        }
+
+        function actualizarTablaGeneralDia() {
+            const tbody = document.getElementById('body-facturas-agregadas');
+            tbody.innerHTML = "";
+            totalAcumuladoComprasDia = 0;
+
+            let acumuladoMateriales = {};
+
+            if (facturasDelDia.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999;">No hay facturas guardadas todavía.</td></tr>`;
+            } else {
+                facturasDelDia.forEach((fact, index) => {
+                    const montoFactura = parseFloat(fact.total_factura) || 0;
+                    totalAcumuladoComprasDia += montoFactura;
+                    let resumenMats = fact.detalles_materiales.map(m => `${m.material} (${m.kilos}kg)`).join(', ');
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td><b>Fact: #${fact.num_factura}</b></td>
+                            <td><b>${fact.nombre}</b><br><small style="color:#555">${fact.cedula}</small></td>
+                            <td style="max-width: 250px; font-size:11px; color:#444;">${resumenMats}</td>
+                            <td><b>₡${montoFactura.toLocaleString('es-CR')}</b></td>
+                            <td style="display: flex; gap: 4px; flex-wrap: wrap;">
+                                <button onclick="imprimirFactura(${index})" class="btn-print" style="background:#2b6cb0; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">🖨️</button>
+                                <button onclick="eliminarFacturaGeneral(${index})" class="btn-del" style="background:#ff5252; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">x</button>
+                            </td>
+                        </tr>
+                    `;
+
+                    fact.detalles_materiales.forEach(m => {
+                        if (!acumuladoMateriales[m.material]) {
+                            acumuladoMateriales[m.material] = { kilos: 0, costo: 0 };
+                        }
+                        acumuladoMateriales[m.material].kilos += m.kilos;
+                        acumuladoMateriales[m.material].costo += (parseFloat(m.total_pago) || 0);
+                    });
+                });
+            }
+
+            document.getElementById('totalFacturasTxt').innerText = totalAcumuladoComprasDia.toLocaleString('es-CR');
+            document.getElementById('pagoMat').value = "₡" + totalAcumuladoComprasDia.toLocaleString('es-CR');
+
+            calcularCajaDinamica();
+            renderizarTablaAcumuladosDia(acumuladoMateriales);
+        }
+
+        window.eliminarFacturaGeneral = (index) => {
+            facturasDelDia.splice(index, 1);
+            localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+            actualizarTablaGeneralDia();
+        };
+
+        // ================================================================
+        // NUEVA FUNCIÓN: IMPRIMIR FACTURA COMO PDF (diseño mejorado)
+        // ================================================================
+        window.imprimirFactura = (index) => {
+            const fact = facturasDelDia[index];
+            if (!fact) return;
+
+            const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
+            const detalles = fact.detalles_materiales.map(m => 
+                `<tr><td>${m.material}</td><td>${m.kilos} kg</td><td>₡${m.precio_unitario.toLocaleString('es-CR')}</td><td>₡${m.total_pago.toLocaleString('es-CR')}</td></tr>`
+            ).join('');
+
+            const firmaHTML = fact.firma ? 
+                `<div class="firma"><b>✍️ Firma del Cliente</b><br><img src="${fact.firma}" alt="Firma"></div>` : '';
+
+            const contenido = `
+                <div class="factura-pdf">
+                    <!-- ENCABEZADO -->
+                    <div class="header">
+                        <div class="empresa">♻️ RECICLAJE CR</div>
+                        <div class="sucursal">📍 ${sucursalActual}</div>
+                    </div>
+
+                    <!-- TÍTULO FACTURA -->
+                    <div class="titulo-factura">FACTURA #${fact.num_factura}</div>
+
+                    <!-- DATOS CLIENTE -->
+                    <div class="info-cliente">
+                        <div>
+                            <p><span class="label">📅 Fecha:</span> <span class="valor">${fecha}</span></p>
+                            <p><span class="label">👤 Cliente:</span> <span class="valor">${fact.nombre}</span></p>
+                        </div>
+                        <div>
+                            <p><span class="label">🆔 Cédula:</span> <span class="valor">${fact.cedula}</span></p>
+                            <p><span class="label">📍 Sucursal:</span> <span class="valor">${sucursalActual}</span></p>
+                        </div>
+                    </div>
+
+                    <!-- TABLA DE MATERIALES -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Material</th>
+                                <th style="text-align:center;">Cantidad (kg)</th>
+                                <th style="text-align:right;">Precio (₡/kg)</th>
+                                <th style="text-align:right;">Total (₡)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${detalles}</tbody>
+                    </table>
+
+                    <!-- TOTAL -->
+                    <div class="total">
+                        <span>Total a Pagar: ₡${fact.total_factura.toLocaleString('es-CR')}</span>
+                    </div>
+
+                    <!-- FIRMA -->
+                    ${firmaHTML}
+
+                    <!-- PIE DE PÁGINA -->
+                    <div class="footer">
+                        <strong>¡Gracias por su visita!</strong> — Este comprobante es válido como recibo de pago.<br>
+                        <span style="font-size:11px;">Sucursal ${sucursalActual} · Teléfono: 2222-2222 · Horario: L-V 8am-6pm</span>
+                    </div>
+                </div>
+            `;
+
+            // Crear elemento temporal para el PDF
+            const tempDiv = document.createElement('div');
+            tempDiv.style.position = 'fixed';
+            tempDiv.style.left = '-9999px';
+            tempDiv.style.top = '0';
+            tempDiv.style.width = '210mm';
+            tempDiv.style.background = 'white';
+            tempDiv.style.padding = '0';
+            tempDiv.style.zIndex = '9999';
+            tempDiv.innerHTML = contenido;
+            document.body.appendChild(tempDiv);
+
+            // Opciones para html2pdf (calidad alta y formato A4)
+            const opt = {
+                margin:        [8, 8, 8, 8], // márgenes en mm
+                filename:      `Factura_${fact.num_factura}.pdf`,
+                image:         { type: 'jpeg', quality: 0.95 },
+                html2canvas:   { scale: 2, letterRendering: true, useCORS: true, logging: false },
+                jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            // Generar y descargar el PDF
+            html2pdf().set(opt).from(tempDiv).save().then(() => {
+                document.body.removeChild(tempDiv);
+            }).catch((err) => {
+                console.error('Error al generar PDF:', err);
+                document.body.removeChild(tempDiv);
+                alert('Ocurrió un error al generar el PDF. Intente de nuevo.');
+            });
+        };
+
+        // ================================================================
+
+        window.enviarTodoFirebase = async function() {
+            if (facturasDelDia.length === 0) {
+                alert("❌ No hay facturas registradas hoy para cerrar.");
+                return;
+            }
+            if(!confirm("¿Desea enviar el cierre total y las facturas al sistema?")) return;
+
+            const btn = document.getElementById('btnEnviarTodo');
+            btn.disabled = true; btn.innerText = "Subiendo Datos...";
+
+            const fecha = document.getElementById('fecha').value;
+
+            try {
+                const batch = writeBatch(db);
+
+                const cierreRef = doc(collection(db, "revisiones_faltantes")); 
+                batch.set(cierreRef, {
+                    uid_trabajador: uidTrabajador, sucursal: sucursalActual, fecha,
+                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
+                    total_ventas: obtenerNumeroLimpio('ventas'),
+                    total_depositos: obtenerTotalDepositos(),
+                    detalles_depositos: listaDepositosDia,
+                    pago_materiales: totalAcumuladoComprasDia,
+                    gastos_facturas: obtenerTotalGastos(),
+                    cierre_mano: obtenerNumeroLimpio('cierreMano'),
+                    estado: "Pendiente", timestamp: serverTimestamp()
+                });
+
+                facturasDelDia.forEach((factura) => {
+                    const factRef = doc(collection(db, "facturas_compras"));
+                    batch.set(factRef, {
+                        ...factura,
+                        cierre_id: cierreRef.id,
+                        sucursal: sucursalActual, fecha, uid_trabajador: uidTrabajador,
+                        timestamp: serverTimestamp()
+                    });
+                });
+
+                await batch.commit();
+                
+                localStorage.removeItem(`facturas_${sucursalActual}`);
+                localStorage.removeItem(`gastos_${sucursalActual}`);
+                localStorage.removeItem(`depositos_${sucursalActual}`);
+                localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
+                localStorage.removeItem(`ventas_${sucursalActual}`);
+
+                alert("✅ Cierre guardado con éxito.");
+                location.reload();
+            } catch (e) {
+                alert("Error: " + e.message);
+                btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA";
+            }
+        };
+
+        window.guardarMovimientoCuenta = async function() {
+            const tipo = document.getElementById('tipoMovimiento').value;
+            const monto = obtenerNumeroLimpio('montoMovimiento');
+            const fechaMov = document.getElementById('fechaMovimiento').value;
+            const motivo = document.getElementById('motivoMovimiento').value.trim();
+
+            if(!monto || monto <= 0 || !fechaMov) {
+                alert("⚠️ Por favor asigne una fecha y un monto válido.");
+                return;
+            }
+
+            const btn = document.getElementById('btnGuardarMov');
+            btn.disabled = true; btn.innerText = "Guardando...";
+
+            try {
+                await addDoc(collection(db, "movimientos_cuenta"), {
+                    uid_trabajador: uidTrabajador,
+                    sucursal: sucursalActual, 
+                    tipo: tipo, 
+                    monto: monto,
+                    fecha_operacion: fechaMov,
+                    motivo: motivo || "Sin especificación",
+                    timestamp: serverTimestamp()
+                });
+
+                alert(`✅ ${tipo} registrado correctamente.`);
+                document.getElementById('montoMovimiento').value = "";
+                document.getElementById('motivoMovimiento').value = "";
+                await calcularDeudaTotal(); 
+            } catch (error) {
+                alert("Error: " + error.message);
+            } finally {
+                btn.disabled = false; btn.innerText = "Registrar en Cuenta Externa";
+            }
+        };
+
+        function renderizarTablaAcumuladosDia(acumulado) {
+            const tbody = document.getElementById('body-materiales-totales-dia');
+            tbody.innerHTML = "";
+
+            if (Object.keys(acumulado).length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">Sin movimientos en el día.</td></tr>`;
+                return;
+            }
+
+            for (const [material, datos] of Object.entries(acumulado)) {
+                tbody.innerHTML += `
+                    <tr>
+                        <td><b>${material}</b></td>
+                        <td style="color:#1a73e8; font-weight:bold;">${datos.kilos.toFixed(1)} kg</td>
+                        <td><b>₡${datos.costo.toLocaleString('es-CR')}</b></td>
+                    </tr>
+                `;
+            }
+        }
+    </script>
 </body>
 </html>
