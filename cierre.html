@@ -42,8 +42,8 @@
         const ID_SECUNDARIA = '1144';
         let temporizadorFirestore = null;
 
-        // Marca cuando estamos editando un cierre cargado de otro día
-        let cierreCargadoParaEditar = null; // { id, fecha }
+        // Variable para saber si estamos editando un cierre de otro día
+        let cierreCargadoParaEditar = null; 
 
         // ---------- DATOS DE CADA SUCURSAL ----------
         const datosSucursales = {
@@ -102,7 +102,7 @@
                 document.getElementById('cajaInicioBase').value = localStorage.getItem(`cajaInicioBase_${sucursalActual}`) || "";
                 document.getElementById('ventas').value = localStorage.getItem(`ventas_${sucursalActual}`) || "";
 
-                // Recuperar marca de edición si se recargó la página
+                // Recuperar el modo edición si se recarga la página
                 const editGuardado = localStorage.getItem(`editando_cierre_${sucursalActual}`);
                 if (editGuardado) {
                     try {
@@ -731,44 +731,20 @@
                             background: white;
                             color: black;
                         }
-                        .header {
-                            margin-bottom: 6px;
-                            border-bottom: 1px solid #000;
-                            padding-bottom: 4px;
-                        }
+                        .header { margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px; }
                         .header div { text-align: left; }
                         .header .factura-titulo { font-size: 16px; font-weight: bold; }
                         .info { margin: 8px 0; }
                         .info div { margin: 2px 0; }
-                        .materiales {
-                            margin: 8px 0;
-                            border-top: 1px solid #000;
-                            border-bottom: 1px solid #000;
-                            padding: 4px 0;
-                        }
-                        .materiales .cabecera {
-                            font-weight: bold;
-                            border-bottom: 1px solid #000;
-                            padding-bottom: 2px;
-                            margin-bottom: 4px;
-                        }
+                        .materiales { margin: 8px 0; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 4px 0; }
+                        .materiales .cabecera { font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 4px; }
                         .total { font-size: 15px; font-weight: bold; margin-top: 6px; text-align: left; }
-                        .firma {
-                            margin-top: 16px;
-                            padding-top: 8px;
-                            border-top: 1px dashed #000;
-                        }
+                        .firma { margin-top: 16px; padding-top: 8px; border-top: 1px dashed #000; }
                         .firma .label { font-weight: bold; font-size: 13px; }
                         .firma .guiones { margin-top: 4px; font-size: 13px; line-height: 1.8; }
                         .firma .guiones div { margin: 0; }
                         .firma .acepto { font-size: 12px; color: #555; margin-top: 4px; }
-                        .footer {
-                            margin-top: 10px;
-                            font-size: 12px;
-                            text-align: left;
-                            border-top: 1px solid #000;
-                            padding-top: 4px;
-                        }
+                        .footer { margin-top: 10px; font-size: 12px; text-align: left; border-top: 1px solid #000; padding-top: 4px; }
                         .extra-papel { height: 30px; background: transparent; border: none; }
                         @media print {
                             .header { border-bottom: 1px solid #000 !important; }
@@ -979,7 +955,7 @@
         };
 
         // =======================================================
-        // ENVIAR CIERRE
+        // ENVIAR CIERRE (NUEVO O CORRECCIÓN)
         // =======================================================
         window.enviarTodoFirebase = async function() {
             if (facturasDelDia.length === 0) {
@@ -1112,7 +1088,7 @@
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px; background: #f0f2f5; margin: 0; color: #333; }
         .login-box { background: white; padding: 25px; max-width: 400px; margin: 60px auto; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; box-sizing: border-box; }
         .login-box input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
-        .grid-layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; max-width: 1300px; margin: auto; }
+        .grid-layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; max-width: 100%; margin: auto; padding: 0 10px; box-sizing: border-box; }
         .card { background: white; padding: 16px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); box-sizing: border-box; }
         h3, h4, h5 { margin-top: 0; color: #1a73e8; }
         label { font-size: 12px; font-weight: 600; color: #4a5568; display: block; margin-top: 10px; }
@@ -1135,7 +1111,7 @@
         .subtotal-banner { text-align: right; font-weight: bold; padding: 10px; color: #1a73e8; font-size: 14px; background: #e8f0fe; border-radius: 8px; margin-top: 10px; }
         .total-banner { text-align: right; font-weight: bold; padding: 12px; color: #2e7d32; font-size: 16px; background: #e8f5e9; border-radius: 8px; margin-top: 10px; }
         .mini-deuda-box { background: #fff5f5; border: 1px solid #feb2b2; padding: 6px 12px; border-radius: 8px; font-size: 13px; color: #c53030; font-weight: bold; text-align: center; margin-bottom: 15px; }
-        .panel-lateral { background: white; padding: 16px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: max-content; box-sizing: border-box; }
+        .panel-lateral { background: white; padding: 16px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: max-content; box-sizing: border-box; width: 100%; overflow: hidden; }
         .scroll-precios { max-height: 300px; overflow-y: auto; margin-bottom: 12px; border-radius: 8px; }
         .box-ultimo-cierre { background: #edf2f7; border-left: 4px solid #3182ce; padding: 10px 14px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #2d3748; }
         .btn-print { background: #2b6cb0; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
@@ -1389,7 +1365,8 @@
             </div>
 
             <button class="btn-work" onclick="mostrarUltimoCierre()" style="margin-bottom: 12px;">📋 Ver Último Cierre</button>
-
+            
+            <!-- BOTÓN AGREGADO -->
             <button class="btn-work" onclick="abrirModalCargarCierre()" style="margin-bottom: 12px; background:#d97706;">📂 Cargar Cierre de Otro Día</button>
 
             <button class="btn-work" onclick="toggleSeccionPrecios()">⚙️ Configurar Precios Materiales</button>
