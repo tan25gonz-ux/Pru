@@ -41,34 +41,13 @@
         let secuenciaActiva = '';
         const ID_SECUNDARIA = '1144';
         let temporizadorFirestore = null;
-
-        // Variable para saber si estamos editando un cierre de otro día
+        
         let cierreCargadoParaEditar = null; 
 
-        // ---------- DATOS DE CADA SUCURSAL ----------
         const datosSucursales = {
-            "Paraiso": {
-                nombre: "Grupo Ingeniería Verde",
-                encargado: "Andrey Brenes León",
-                cedula: "3-0393-0862",
-                direccion: "Cartago",
-                telefono: "8342-1610",
-                correo: "grupoingenieriaverde@gmail.com"
-            },
-            "Perez": {
-                nombre: "LA CAMPINA - Centro de Acopio y Reciclaje",
-                encargado: "MOISÉS COTO ROJAS",
-                telefono: "8855-4242 / 8964-7726",
-                direccion: "Pérez Zeledón - Repunta - San José - Costa Rica"
-            },
-            "Cartago": {
-                nombre: "Centro de reciclaje el Guarco",
-                encargado: "Marvin Eduardo Brenes León",
-                cedula: "3-0367-0749",
-                direccion: "Cartago, Tejar de El Guarco",
-                telefono: "8342-1610",
-                correo: "centroacopioeltejar@hotmail.com"
-            }
+            "Paraiso": { nombre: "Grupo Ingeniería Verde", encargado: "Andrey Brenes León", cedula: "3-0393-0862", direccion: "Cartago", telefono: "8342-1610", correo: "grupoingenieriaverde@gmail.com" },
+            "Perez": { nombre: "LA CAMPINA - Centro de Acopio y Reciclaje", encargado: "MOISÉS COTO ROJAS", telefono: "8855-4242 / 8964-7726", direccion: "Pérez Zeledón - Repunta - San José - Costa Rica" },
+            "Cartago": { nombre: "Centro de reciclaje el Guarco", encargado: "Marvin Eduardo Brenes León", cedula: "3-0367-0749", direccion: "Cartago, Tejar de El Guarco", telefono: "8342-1610", correo: "centroacopioeltejar@hotmail.com" }
         };
 
         onAuthStateChanged(auth, async (user) => {
@@ -76,15 +55,10 @@
                 uidTrabajador = user.uid;
                 const emailUsuario = user.email ? user.email.toLowerCase().trim() : "";
 
-                if (emailUsuario.includes("perez")) {
-                    sucursalActual = "Perez";
-                } else if (emailUsuario.includes("paraiso")) {
-                    sucursalActual = "Paraiso";
-                } else if (emailUsuario.includes("cartago")) {
-                    sucursalActual = "Cartago";
-                } else {
-                    sucursalActual = "Desconocida";
-                }
+                if (emailUsuario.includes("perez")) sucursalActual = "Perez";
+                else if (emailUsuario.includes("paraiso")) sucursalActual = "Paraiso";
+                else if (emailUsuario.includes("cartago")) sucursalActual = "Cartago";
+                else sucursalActual = "Desconocida";
 
                 document.getElementById('login-section').style.display = 'none';
                 document.getElementById('modulo-principal').style.display = 'grid';
@@ -102,11 +76,11 @@
                 document.getElementById('cajaInicioBase').value = localStorage.getItem(`cajaInicioBase_${sucursalActual}`) || "";
                 document.getElementById('ventas').value = localStorage.getItem(`ventas_${sucursalActual}`) || "";
 
-                // Recuperar el modo edición si se recarga la página
                 const editGuardado = localStorage.getItem(`editando_cierre_${sucursalActual}`);
                 if (editGuardado) {
                     try {
                         cierreCargadoParaEditar = JSON.parse(editGuardado);
+                        document.getElementById('fecha').value = cierreCargadoParaEditar.fecha;
                         mostrarBannerEdicion();
                     } catch(e) { cierreCargadoParaEditar = null; }
                 }
@@ -114,7 +88,6 @@
                 await cargarPreciosDesdeFirebase();
                 await calcularDeudaTotal();
                 await cargarUltimoCierre();
-
                 await cargarNumerosSecuencias();
                 await cambiarSecuencia('default');
 
@@ -127,41 +100,111 @@
             }
         });
 
+        // =====================================================================
+        // 🚀 NUEVA FUNCIÓN: AL CAMBIAR LA FECHA, VERIFICA SI HAY CIERRE
+        // =====================================================================
+        window.alCambiarFecha = async function() {
+            const fechaSeleccionada = document.getElementById('fecha').value;
+            if (!fechaSeleccionada) return;
+
+            const q = query(
+                collection(db, "revisiones_faltantes"),
+                where("sucursal", "==", sucursalActual),
+                where("fecha", "==", fechaSeleccionada),
+                limit(1)
+            );
+            const snap = await getDocs(q);
+
+            if (!snap.empty) {
+                const docSnap = snap.docs[0];
+                const confirmar = confirm(`Ya existe un cierre para la fecha ${fechaSeleccionada}.\n\n¿Desea cargarlo para modificarlo?`);
+                
+                if (confirmar) {
+                    const cierreData = docSnap.data();
+                    
+                    // 1. Cargar facturas
+                    const facturasQuery = query(collection(db, "facturas_compras"), where("cierre_id", "==", docSnap.id));
+                    const facturasSnap = await getDocs(facturasQuery);
+                    facturasDelDia = [];
+                    facturasSnap.forEach(fDoc => facturasDelDia.push(fDoc.data()));
+
+                    // 2. Cargar gastos y depósitos
+                    listaGastosDia = cierreData.detalles_gastos || [];
+                    listaDepositosDia = cierreData.detalles_depositos || [];
+                    cierreCargadoParaEditar = { id: docSnap.id, fecha: fechaSeleccionada };
+
+                    // 3. Poner valores en caja
+                    document.getElementById('cajaInicioBase').value = (parseFloat(cierreData.caja_inicio) || 0).toLocaleString('es-CR');
+                    document.getElementById('ventas').value = (parseFloat(cierreData.total_ventas) || 0).toLocaleString('es-CR');
+
+                    // 4. Guardar en memoria y actualizar UI
+                    localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+                    localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
+                    localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
+                    localStorage.setItem(`editando_cierre_${sucursalActual}`, JSON.stringify(cierreCargadoParaEditar));
+                    
+                    actualizarTablaGeneralDia();
+                    actualizarTablaGastos();
+                    actualizarTablaDepositos();
+                    mostrarBannerEdicion();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            } else {
+                // Si no hay cierre, limpia la pantalla para un cierre nuevo
+                cierreCargadoParaEditar = null;
+                localStorage.removeItem(`editando_cierre_${sucursalActual}`);
+                document.getElementById('banner-modo-edicion')?.remove();
+            }
+        };
+
+        function mostrarBannerEdicion() {
+            let banner = document.getElementById('banner-modo-edicion');
+            if (banner) banner.remove();
+
+            if (!cierreCargadoParaEditar) return;
+
+            banner = document.createElement('div');
+            banner.id = 'banner-modo-edicion';
+            banner.style.cssText = `background: #fef3c7; border: 2px solid #d97706; color: #92400e; padding: 12px 16px; border-radius: 10px; margin-bottom: 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;`;
+            banner.innerHTML = `
+                <span>✏️ MODO CORRECCIÓN: Editando cierre del <b>${cierreCargadoParaEditar.fecha}</b>. Al enviar, se guardará como un nuevo cierre corregido.</span>
+                <button onclick="cancelarEdicionCierre()" style="background:#dc2626; color:white; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; min-height:auto;">✖ Cancelar</button>
+            `;
+            document.querySelector('.card').insertBefore(banner, document.querySelector('.card').firstChild);
+        }
+
+        window.cancelarEdicionCierre = function() {
+            if (!confirm("Se descartarán los cambios y se recargará la página. ¿Continuar?")) return;
+            cierreCargadoParaEditar = null;
+            localStorage.removeItem(`editando_cierre_${sucursalActual}`);
+            location.reload();
+        };
+
+        // =====================================================================
+        // RESTO DE FUNCIONES (facturación, precios, caja, etc.)
+        // =====================================================================
         async function cargarNumerosSecuencias() {
             try {
                 const refBase = doc(db, "contadores_facturas", sucursalActual);
                 const snapBase = await getDoc(refBase);
-                const numBase = snapBase.exists() ? (snapBase.data().ultimo_numero || 0) + 1 : 1;
-                document.getElementById('num-default').innerText = numBase;
-
+                document.getElementById('num-default').innerText = snapBase.exists() ? (snapBase.data().ultimo_numero || 0) + 1 : 1;
                 const refSec = doc(db, "contadores_facturas", `${sucursalActual}_${ID_SECUNDARIA}`);
                 const snapSec = await getDoc(refSec);
-                const numSec = snapSec.exists() ? (snapSec.data().ultimo_numero || 0) + 1 : 1;
-                document.getElementById('num-secundaria').innerText = numSec;
-
-            } catch (error) {
-                console.error("Error al cargar los números de secuencia:", error);
-            }
+                document.getElementById('num-secundaria').innerText = snapSec.exists() ? (snapSec.data().ultimo_numero || 0) + 1 : 1;
+            } catch (error) { console.error(error); }
         }
 
         window.cambiarSecuencia = async function(tipo) {
             secuenciaActiva = (tipo === 'default') ? '' : ID_SECUNDARIA;
-
             const boxDefault = document.getElementById('seq-default-box');
             const boxSec = document.getElementById('seq-secundaria-box');
-
             if (secuenciaActiva === '') {
-                boxDefault.className = 'seq-box seq-active';
-                boxDefault.querySelector('.seq-status').innerText = '🔵 Activo';
-                boxSec.className = 'seq-box seq-inactive';
-                boxSec.querySelector('.seq-status').innerText = '⚪ Inactivo';
+                boxDefault.className = 'seq-box seq-active'; boxDefault.querySelector('.seq-status').innerText = '🔵 Activo';
+                boxSec.className = 'seq-box seq-inactive'; boxSec.querySelector('.seq-status').innerText = '⚪ Inactivo';
             } else {
-                boxSec.className = 'seq-box seq-active';
-                boxSec.querySelector('.seq-status').innerText = '🔵 Activo';
-                boxDefault.className = 'seq-box seq-inactive';
-                boxDefault.querySelector('.seq-status').innerText = '⚪ Inactivo';
+                boxSec.className = 'seq-box seq-active'; boxSec.querySelector('.seq-status').innerText = '🔵 Activo';
+                boxDefault.className = 'seq-box seq-inactive'; boxDefault.querySelector('.seq-status').innerText = '⚪ Inactivo';
             }
-
             await obtenerSiguienteNumeroFacturaActual();
         }
 
@@ -170,47 +213,27 @@
                 const idContador = secuenciaActiva ? `${sucursalActual}_${secuenciaActiva}` : sucursalActual;
                 const docRef = doc(db, "contadores_facturas", idContador);
                 const docSnap = await getDoc(docRef);
-                let siguienteNum = 1;
-
-                if (docSnap.exists()) {
-                    siguienteNum = (docSnap.data().ultimo_numero || 0) + 1;
-                }
-                document.getElementById('numFacturaCliente').value = siguienteNum;
-            } catch (error) {
-                console.error("Error al obtener número de factura:", error);
-            }
+                document.getElementById('numFacturaCliente').value = docSnap.exists() ? (docSnap.data().ultimo_numero || 0) + 1 : 1;
+            } catch (error) { console.error(error); }
         }
 
         async function cargarUltimoCierre() {
             try {
-                const q = query(
-                    collection(db, "revisiones_faltantes"),
-                    where("sucursal", "==", sucursalActual),
-                    orderBy("timestamp", "desc"),
-                    limit(1)
-                );
+                const q = query(collection(db, "revisiones_faltantes"), where("sucursal", "==", sucursalActual), orderBy("timestamp", "desc"), limit(1));
                 const snap = await getDocs(q);
                 if (!snap.empty) {
                     const docData = snap.docs[0].data();
-                    const inicio = parseFloat(docData.caja_inicio) || 0;
-                    const cierre = parseFloat(docData.cierre_mano) || 0;
-
                     document.getElementById('infoUltimoCierre').innerHTML = `
-                        <b>📥 Dinero Base Inicial:</b> ₡${inicio.toLocaleString('es-CR')} | 
-                        <b>📤 Disponible al Cierre:</b> ₡${cierre.toLocaleString('es-CR')} 
-                        <small style="color:#718096;">(${docData.fecha || ''})</small>
-                    `;
+                        <b>📥 Dinero Base Inicial:</b> ₡${(parseFloat(docData.caja_inicio) || 0).toLocaleString('es-CR')} | 
+                        <b>📤 Disponible al Cierre:</b> ₡${(parseFloat(docData.cierre_mano) || 0).toLocaleString('es-CR')} 
+                        <small style="color:#718096;">(${docData.fecha || ''})</small>`;
                 } else {
                     document.getElementById('infoUltimoCierre').innerText = "No se encontraron cierres previos registrados.";
                 }
-            } catch (error) {
-                console.error("Error consultando último cierre: ", error);
-            }
+            } catch (error) { console.error(error); }
         }
 
-        window.mostrarUltimoCierre = function() {
-            window.location.href = 'ultimocierre.html';
-        };
+        window.mostrarUltimoCierre = () => window.location.href = 'ultimocierre.html';
 
         async function cargarPreciosDesdeFirebase() {
             const pDoc = await getDoc(doc(db, "config_precios", uidTrabajador));
@@ -223,31 +246,22 @@
         function cargarTablaListaMateriales() {
             const tbody = document.getElementById('body-lista-facturacion');
             tbody.innerHTML = "";
-
             listaMaterialesBase.forEach((mat, idx) => {
                 const precio = preciosTrabajador[mat] || 0;
                 tbody.innerHTML += `
                     <tr>
                         <td style="font-weight:600; font-size:12px;">${mat}</td>
                         <td style="font-size:12px; color:#666;">₡${precio.toLocaleString('es-CR')}</td>
-                        <td>
-                            <input type="number" step="any" id="kg_${idx}" data-mat="${mat}" data-precio="${precio}" 
-                            placeholder="0.0" oninput="calcularTotalFila(this, 'monto_${idx}')" style="height:32px; padding:4px; font-size:13px;">
-                        </td>
-                        <td>
-                            <input type="text" id="monto_${idx}" class="monto-fila" readonly value="₡0" 
-                            style="height:32px; padding:4px; font-size:13px; font-weight:bold; background:#e2e8f0; border:none;">
-                        </td>
-                    </tr>
-                `;
+                        <td><input type="number" step="any" id="kg_${idx}" data-mat="${mat}" data-precio="${precio}" placeholder="0.0" oninput="calcularTotalFila(this, 'monto_${idx}')" style="height:32px; padding:4px; font-size:13px;"></td>
+                        <td><input type="text" id="monto_${idx}" class="monto-fila" readonly value="₡0" style="height:32px; padding:4px; font-size:13px; font-weight:bold; background:#e2e8f0; border:none;"></td>
+                    </tr>`;
             });
         }
 
         window.calcularTotalFila = (inputKg, idMonto) => {
             const kg = parseFloat(inputKg.value) || 0;
             const precio = parseFloat(inputKg.dataset.precio) || 0;
-            const total = kg * precio;
-            document.getElementById(idMonto).value = "₡" + total.toLocaleString('es-CR');
+            document.getElementById(idMonto).value = "₡" + (kg * precio).toLocaleString('es-CR');
             calcularSubtotalLista();
         };
 
@@ -255,11 +269,7 @@
             let subtotal = 0;
             listaMaterialesBase.forEach((mat, idx) => {
                 const inputKg = document.getElementById(`kg_${idx}`);
-                if (inputKg) {
-                    const kg = parseFloat(inputKg.value) || 0;
-                    const precio = parseFloat(inputKg.dataset.precio) || 0;
-                    subtotal += (kg * precio);
-                }
+                if (inputKg) subtotal += (parseFloat(inputKg.value) || 0) * (parseFloat(inputKg.dataset.precio) || 0);
             });
             document.getElementById('subtotalFacturaTxt').innerText = subtotal.toLocaleString('es-CR');
         }
@@ -268,108 +278,70 @@
             try {
                 const q = query(collection(db, "movimientos_cuenta"), where("sucursal", "==", sucursalActual));
                 const querySnapshot = await getDocs(q);
-
-                let deudaCalculada = 0;
+                let deuda = 0;
                 querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    const monto = parseFloat(data.monto) || 0;
-                    if (data.tipo === "Salida_Venta") deudaCalculada += monto;
-                    else if (data.tipo === "Deposito") deudaCalculada -= monto;
+                    const data = doc.data(); const monto = parseFloat(data.monto) || 0;
+                    if (data.tipo === "Salida_Venta") deuda += monto;
+                    else if (data.tipo === "Deposito") deuda -= monto;
                 });
-
-                document.getElementById('deudaTotalTxt').innerText = deudaCalculada.toLocaleString('es-CR');
-            } catch (error) {
-                console.error("Error calculando la deuda: ", error);
-            }
+                document.getElementById('deudaTotalTxt').innerText = deuda.toLocaleString('es-CR');
+            } catch (error) { console.error(error); }
         }
 
         window.login = async () => {
-            try {
-                await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('pass').value);
-            } catch(e) { alert("Error: " + e.message); }
+            try { await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('pass').value); } 
+            catch(e) { alert("Error: " + e.message); }
         };
-
         window.logout = () => signOut(auth);
 
         function cargarTablaPreciosVisual() {
             const tbody = document.getElementById('body-lista-precios');
-            tbody.innerHTML = "";
-            let tienePrecios = false;
+            tbody.innerHTML = ""; let tiene = false;
             for (const [material, precio] of Object.entries(preciosTrabajador)) {
-                if (precio > 0) {
-                    tienePrecios = true;
-                    tbody.innerHTML += `<tr><td>${material}</td><td><b>₡${precio.toLocaleString('es-CR')}</b></td></tr>`;
-                }
+                if (precio > 0) { tiene = true; tbody.innerHTML += `<tr><td>${material}</td><td><b>₡${precio.toLocaleString('es-CR')}</b></td></tr>`; }
             }
-            if(!tienePrecios) {
-                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#999;">No hay precios configurados.</td></tr>`;
-            }
+            if(!tiene) tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#999;">No hay precios configurados.</td></tr>`;
         }
 
         function cargarSelectEdicionPrecios() {
-            const selectEdicion = document.getElementById('editMatSelect');
-            selectEdicion.innerHTML = "";
-            listaMaterialesBase.forEach(mat => {
-                selectEdicion.innerHTML += `<option value="${mat}">${mat}</option>`;
-            });
+            const select = document.getElementById('editMatSelect');
+            select.innerHTML = "";
+            listaMaterialesBase.forEach(mat => select.innerHTML += `<option value="${mat}">${mat}</option>`);
             actualizarPrecioEnEdicion();
         }
 
-        window.actualizarPrecioEnEdicion = () => {
-            const mat = document.getElementById('editMatSelect').value;
-            document.getElementById('editMatPrecio').value = preciosTrabajador[mat] || 0;
-        };
+        window.actualizarPrecioEnEdicion = () => document.getElementById('editMatPrecio').value = preciosTrabajador[document.getElementById('editMatSelect').value] || 0;
 
         window.guardarPrecioFirebase = async function() {
             const mat = document.getElementById('editMatSelect').value;
             const nuevoPrecio = parseFloat(document.getElementById('editMatPrecio').value) || 0;
             if(nuevoPrecio < 0) return;
-
-            const btn = document.getElementById('btnGuardarPrecio');
-            btn.disabled = true;
-
+            document.getElementById('btnGuardarPrecio').disabled = true;
             preciosTrabajador[mat] = nuevoPrecio;
             try {
                 await setDoc(doc(db, "config_precios", uidTrabajador), { materiales: preciosTrabajador }, { merge: true });
-                alert(`✅ Precio actualizado.`);
-                cargarTablaPreciosVisual();
-                cargarTablaListaMateriales();
+                alert(`✅ Precio actualizado.`); cargarTablaPreciosVisual(); cargarTablaListaMateriales();
             } catch (error) { alert("Error: " + error.message); }
-            finally { btn.disabled = false; btn.innerText = "💾 Guardar Precio"; }
+            finally { document.getElementById('btnGuardarPrecio').disabled = false; document.getElementById('btnGuardarPrecio').innerText = "💾 Guardar Precio"; }
         };
 
-        window.toggleSeccionPrecios = () => {
-            const div = document.getElementById('seccion-editar-precios');
-            div.style.display = (div.style.display === 'none') ? 'block' : 'none';
-        };
+        window.toggleSeccionPrecios = () => document.getElementById('seccion-editar-precios').style.display = document.getElementById('seccion-editar-precios').style.display === 'none' ? 'block' : 'none';
 
         window.validarCedulaTSE = async function() {
-            const cedulaInput = document.getElementById('cedulaCliente').value.trim();
-            const btn = document.getElementById('btnValidarCed');
-            const cedulaLimpia = cedulaInput.replace(/-/g, '');
-
+            const cedulaLimpia = document.getElementById('cedulaCliente').value.trim().replace(/-/g, '');
             if(!cedulaLimpia) { alert("Ingrese una cédula."); return; }
-            btn.innerText = "⚡..."; btn.disabled = true;
-
+            const btn = document.getElementById('btnValidarCed'); btn.innerText = "⚡..."; btn.disabled = true;
             try {
-                const docRef = doc(db, "clientes", cedulaLimpia);
-                const docSnap = await getDoc(docRef);
-
+                const docSnap = await getDoc(doc(db, "clientes", cedulaLimpia));
                 if (docSnap.exists()) {
                     document.getElementById('nombreCliente').value = docSnap.data().nombre;
                     document.getElementById('nombreCliente').readOnly = true;
                 } else {
                     alert("ℹ️ Cliente nuevo. Por favor, digite el nombre completo manualmente.");
-                    document.getElementById('nombreCliente').value = "";
-                    document.getElementById('nombreCliente').readOnly = false;
-                    document.getElementById('nombreCliente').focus();
+                    document.getElementById('nombreCliente').value = ""; document.getElementById('nombreCliente').readOnly = false; document.getElementById('nombreCliente').focus();
                 }
-            } catch (error) {
-                alert("Error al buscar en la base de datos.");
-            } finally {
-                btn.innerText = "🔎";
-                btn.disabled = false;
-            }
+            } catch (error) { alert("Error al buscar."); }
+            finally { btn.innerText = "🔎"; btn.disabled = false; }
         };
 
         window.guardarFacturaCompletaCliente = async function() {
@@ -377,17 +349,9 @@
             const nombre = document.getElementById('nombreCliente').value.trim();
             let numFactura = document.getElementById('numFacturaCliente').value.trim();
             const cedulaLimpia = cedula.replace(/-/g, '');
-
-            if (!cedulaLimpia || !nombre || !numFactura) {
-                alert("⚠️ Debe ingresar la Cédula, el Nombre y el Número de Factura.");
-                return;
-            }
-
+            if (!cedulaLimpia || !nombre || !numFactura) return alert("⚠️ Debe ingresar Cédula, Nombre y Número de Factura.");
             let numFacturaInt = parseInt(numFactura);
-            if (isNaN(numFacturaInt) || numFacturaInt < 1) {
-                alert("⚠️ El número de factura debe ser un número entero positivo.");
-                return;
-            }
+            if (isNaN(numFacturaInt) || numFacturaInt < 1) return alert("⚠️ El número de factura debe ser un entero positivo.");
 
             let materialesIngresados = [];
             listaMaterialesBase.forEach((mat, idx) => {
@@ -395,87 +359,43 @@
                 if (inputKg) {
                     const kilos = parseFloat(inputKg.value) || 0;
                     const precio_u = parseFloat(inputKg.dataset.precio) || 0;
-                    if (kilos > 0) {
-                        materialesIngresados.push({
-                            material: mat,
-                            kilos: kilos,
-                            precio_unitario: precio_u,
-                            total_pago: kilos * precio_u
-                        });
-                    }
+                    if (kilos > 0) materialesIngresados.push({ material: mat, kilos: kilos, precio_unitario: precio_u, total_pago: kilos * precio_u });
                 }
             });
-
-            if (materialesIngresados.length === 0) {
-                alert("⚠️ Ingrese el pesaje (kg) en al menos un material.");
-                return;
-            }
+            if (materialesIngresados.length === 0) return alert("⚠️ Ingrese el pesaje en al menos un material.");
 
             try {
-                await setDoc(doc(db, "clientes", cedulaLimpia), {
-                    nombre: nombre,
-                    ultima_actualizacion: serverTimestamp()
-                }, { merge: true });
-
+                await setDoc(doc(db, "clientes", cedulaLimpia), { nombre: nombre, ultima_actualizacion: serverTimestamp() }, { merge: true });
                 const idContador = secuenciaActiva ? `${sucursalActual}_${secuenciaActiva}` : sucursalActual;
                 const docRef = doc(db, "contadores_facturas", idContador);
                 const docSnap = await getDoc(docRef);
-                let ultimoNum = 0;
-                if (docSnap.exists()) {
-                    ultimoNum = docSnap.data().ultimo_numero || 0;
+                if (numFacturaInt > (docSnap.exists() ? docSnap.data().ultimo_numero || 0 : 0)) {
+                    await setDoc(docRef, { ultimo_numero: numFacturaInt }, { merge: true });
                 }
-                if (numFacturaInt > ultimoNum) {
-                    await setDoc(docRef, {
-                        ultimo_numero: numFacturaInt
-                    }, { merge: true });
-                }
-            } catch (err) {
-                console.error("Error guardando cliente o contador: ", err);
-            }
-
-            let totalFactura = materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0);
+            } catch (err) { console.error(err); }
 
             facturasDelDia.push({
-                num_factura: numFactura,
-                serie: secuenciaActiva,
-                cedula: cedulaLimpia,
-                nombre,
-                detalles_materiales: materialesIngresados,
-                total_factura: totalFactura
+                num_factura: numFactura, serie: secuenciaActiva, cedula: cedulaLimpia, nombre,
+                detalles_materiales: materialesIngresados, total_factura: materialesIngresados.reduce((sum, item) => sum + item.total_pago, 0)
             });
-
             localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
-
-            actualizarTablaGeneralDia();
-            limpiarFormularioFactura();
-            await cargarNumerosSecuencias();
-            await obtenerSiguienteNumeroFacturaActual();
+            actualizarTablaGeneralDia(); limpiarFormularioFactura(); await cargarNumerosSecuencias(); await obtenerSiguienteNumeroFacturaActual();
             document.getElementById('cedulaCliente').focus();
         };
 
         function limpiarFormularioFactura() {
-            document.getElementById('cedulaCliente').value = "";
-            document.getElementById('nombreCliente').value = "";
-            document.getElementById('nombreCliente').readOnly = false;
-            cargarTablaListaMateriales();
+            document.getElementById('cedulaCliente').value = ""; document.getElementById('nombreCliente').value = "";
+            document.getElementById('nombreCliente').readOnly = false; cargarTablaListaMateriales();
             document.getElementById('subtotalFacturaTxt').innerText = "0";
         }
 
         window.agregarDepositoLista = () => {
             const desc = document.getElementById('depositoDescInput').value.trim();
             const monto = obtenerNumeroLimpio('depositoMontoInput');
-
-            if (monto <= 0) {
-                alert("⚠️ Ingrese un monto válido para la entrada de dinero.");
-                return;
-            }
-
+            if (monto <= 0) return alert("⚠️ Ingrese un monto válido.");
             listaDepositosDia.push({ descripcion: desc || "Entrada / Depósito", monto: monto });
             localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
-
-            document.getElementById('depositoDescInput').value = "";
-            document.getElementById('depositoMontoInput').value = "";
-
+            document.getElementById('depositoDescInput').value = ""; document.getElementById('depositoMontoInput').value = "";
             actualizarTablaDepositos();
         };
 
@@ -485,49 +405,27 @@
             actualizarTablaDepositos();
         };
 
-        function obtenerTotalDepositos() {
-            return listaDepositosDia.reduce((sum, d) => sum + d.monto, 0);
-        }
+        function obtenerTotalDepositos() { return listaDepositosDia.reduce((sum, d) => sum + d.monto, 0); }
 
         function actualizarTablaDepositos() {
-            const tbody = document.getElementById('body-depositos-lista');
-            tbody.innerHTML = "";
-            let total = 0;
-
-            if (listaDepositosDia.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay dinero extra agregado.</td></tr>`;
-            } else {
+            const tbody = document.getElementById('body-depositos-lista'); tbody.innerHTML = ""; let total = 0;
+            if (listaDepositosDia.length === 0) tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay dinero extra agregado.</td></tr>`;
+            else {
                 listaDepositosDia.forEach((dep, idx) => {
                     total += dep.monto;
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${dep.descripcion}</td>
-                            <td><b>+₡${dep.monto.toLocaleString('es-CR')}</b></td>
-                            <td style="width:40px; text-align:center;"><button onclick="eliminarDepositoLista(${idx})" class="btn-del">x</button></td>
-                        </tr>
-                    `;
+                    tbody.innerHTML += `<tr><td>${dep.descripcion}</td><td><b>+₡${dep.monto.toLocaleString('es-CR')}</b></td><td style="width:40px; text-align:center;"><button onclick="eliminarDepositoLista(${idx})" class="btn-del">x</button></td></tr>`;
                 });
             }
-
-            document.getElementById('depositosRecibidosTxt').value = "₡" + total.toLocaleString('es-CR');
-            calcularCajaDinamica();
+            document.getElementById('depositosRecibidosTxt').value = "₡" + total.toLocaleString('es-CR'); calcularCajaDinamica();
         }
 
         window.agregarGastoLista = () => {
             const desc = document.getElementById('gastoDescInput').value.trim();
             const monto = obtenerNumeroLimpio('gastoMontoInput');
-
-            if (!desc || monto <= 0) {
-                alert("⚠️ Ingrese una descripción y un monto válido para el gasto.");
-                return;
-            }
-
+            if (!desc || monto <= 0) return alert("⚠️ Ingrese descripción y monto válido.");
             listaGastosDia.push({ descripcion: desc, monto: monto });
             localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
-
-            document.getElementById('gastoDescInput').value = "";
-            document.getElementById('gastoMontoInput').value = "";
-
+            document.getElementById('gastoDescInput').value = ""; document.getElementById('gastoMontoInput').value = "";
             actualizarTablaGastos();
         };
 
@@ -537,130 +435,80 @@
             actualizarTablaGastos();
         };
 
-        function obtenerTotalGastos() {
-            return listaGastosDia.reduce((sum, g) => sum + g.monto, 0);
-        }
+        function obtenerTotalGastos() { return listaGastosDia.reduce((sum, g) => sum + g.monto, 0); }
 
         function actualizarTablaGastos() {
-            const tbody = document.getElementById('body-gastos-lista');
-            tbody.innerHTML = "";
-            let total = 0;
-
-            if (listaGastosDia.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay gastos registrados hoy.</td></tr>`;
-            } else {
+            const tbody = document.getElementById('body-gastos-lista'); tbody.innerHTML = ""; let total = 0;
+            if (listaGastosDia.length === 0) tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">No hay gastos registrados hoy.</td></tr>`;
+            else {
                 listaGastosDia.forEach((gasto, idx) => {
                     total += gasto.monto;
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${gasto.descripcion}</td>
-                            <td><b>-₡${gasto.monto.toLocaleString('es-CR')}</b></td>
-                            <td style="width:40px; text-align:center;"><button onclick="eliminarGastoLista(${idx})" class="btn-del">x</button></td>
-                        </tr>
-                    `;
+                    tbody.innerHTML += `<tr><td>${gasto.descripcion}</td><td><b>-₡${gasto.monto.toLocaleString('es-CR')}</b></td><td style="width:40px; text-align:center;"><button onclick="eliminarGastoLista(${idx})" class="btn-del">x</button></td></tr>`;
                 });
             }
-
-            document.getElementById('gastosFact').value = "₡" + total.toLocaleString('es-CR');
-            calcularCajaDinamica();
+            document.getElementById('gastosFact').value = "₡" + total.toLocaleString('es-CR'); calcularCajaDinamica();
         }
 
         window.formatearInputMoneda = (input) => {
             let valor = input.value.replace(/\D/g, "");
-            if (valor) input.value = Number(valor).toLocaleString('es-CR');
-            else input.value = "";
+            input.value = valor ? Number(valor).toLocaleString('es-CR') : "";
             calcularCajaDinamica();
         };
 
-        function obtenerNumeroLimpio(idElemento) {
-            const inputElement = document.getElementById(idElemento);
-            if (!inputElement || !inputElement.value) return 0;
-            const textoLimpio = inputElement.value.replace(/[\s.,₡]/g, "");
-            return parseFloat(textoLimpio) || 0;
+        function obtenerNumeroLimpio(id) {
+            const el = document.getElementById(id);
+            return el && el.value ? parseFloat(el.value.replace(/[\s.,₡]/g, "")) || 0 : 0;
         }
 
         window.calcularCajaDinamica = () => {
-            const inicioBase = obtenerNumeroLimpio('cajaInicioBase');
-            const ventas = obtenerNumeroLimpio('ventas');
-            const depositosPlata = obtenerTotalDepositos();
-            const pagoFacturas = totalAcumuladoComprasDia;
-            const gastosFact = obtenerTotalGastos();
-
-            const disponibleCaja = (inicioBase + depositosPlata + ventas) - (pagoFacturas + gastosFact);
-
-            document.getElementById('cajaDisponibleActual').value = "₡" + disponibleCaja.toLocaleString('es-CR');
-            document.getElementById('cierreMano').value = "₡" + disponibleCaja.toLocaleString('es-CR');
-
+            const disponible = (obtenerNumeroLimpio('cajaInicioBase') + obtenerTotalDepositos() + obtenerNumeroLimpio('ventas')) - (totalAcumuladoComprasDia + obtenerTotalGastos());
+            document.getElementById('cajaDisponibleActual').value = "₡" + disponible.toLocaleString('es-CR');
+            document.getElementById('cierreMano').value = "₡" + disponible.toLocaleString('es-CR');
             localStorage.setItem(`cajaInicioBase_${sucursalActual}`, document.getElementById('cajaInicioBase').value);
             localStorage.setItem(`ventas_${sucursalActual}`, document.getElementById('ventas').value);
-
             clearTimeout(temporizadorFirestore);
-            temporizadorFirestore = setTimeout(() => {
-                actualizarCajaFirestore(disponibleCaja);
-            }, 1000);
+            temporizadorFirestore = setTimeout(() => actualizarCajaFirestore(disponible), 1000);
         };
 
         async function actualizarCajaFirestore(disponible) {
             if (!sucursalActual || sucursalActual === "Desconocida") return;
             try {
                 await setDoc(doc(db, "cajas_en_vivo", sucursalActual), {
-                    sucursal: sucursalActual,
-                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
-                    depositos: obtenerTotalDepositos(),
-                    ventas: obtenerNumeroLimpio('ventas'),
-                    compras_facturas: totalAcumuladoComprasDia,
-                    gastos: obtenerTotalGastos(),
-                    caja_disponible: disponible,
-                    ultima_actualizacion: serverTimestamp()
+                    sucursal: sucursalActual, caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
+                    depositos: obtenerTotalDepositos(), ventas: obtenerNumeroLimpio('ventas'),
+                    compras_facturas: totalAcumuladoComprasDia, gastos: obtenerTotalGastos(),
+                    caja_disponible: disponible, ultima_actualizacion: serverTimestamp()
                 }, { merge: true });
-            } catch (e) {
-                console.error("Error sincronizando caja en vivo:", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         function actualizarTablaGeneralDia() {
-            const tbody = document.getElementById('body-facturas-agregadas');
-            tbody.innerHTML = "";
-            totalAcumuladoComprasDia = 0;
-
+            const tbody = document.getElementById('body-facturas-agregadas'); tbody.innerHTML = ""; totalAcumuladoComprasDia = 0;
             let acumuladoMateriales = {};
-
-            if (facturasDelDia.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999;">No hay facturas guardadas todavía.</td></tr>`;
-            } else {
+            if (facturasDelDia.length === 0) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999;">No hay facturas guardadas todavía.</td></tr>`;
+            else {
                 facturasDelDia.forEach((fact, index) => {
-                    const montoFactura = parseFloat(fact.total_factura) || 0;
-                    totalAcumuladoComprasDia += montoFactura;
-                    let resumenMats = fact.detalles_materiales.map(m => `${m.material} (${m.kilos}kg)`).join(', ');
-
+                    const monto = parseFloat(fact.total_factura) || 0; totalAcumuladoComprasDia += monto;
                     tbody.innerHTML += `
                         <tr>
                             <td><b>Fact: #${fact.num_factura}</b> ${fact.serie ? '('+fact.serie+')' : ''}</td>
                             <td><b>${fact.nombre}</b><br><small style="color:#555">${fact.cedula}</small></td>
-                            <td style="max-width: 250px; font-size:11px; color:#444;">${resumenMats}</td>
-                            <td><b>₡${montoFactura.toLocaleString('es-CR')}</b></td>
+                            <td style="max-width: 250px; font-size:11px; color:#444;">${fact.detalles_materiales.map(m => `${m.material} (${m.kilos}kg)`).join(', ')}</td>
+                            <td><b>₡${monto.toLocaleString('es-CR')}</b></td>
                             <td style="display: flex; gap: 4px; flex-wrap: wrap;">
                                 <button onclick="imprimirFactura(${index})" class="btn-print" style="background:#2b6cb0; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">🖨️</button>
                                 <button onclick="eliminarFacturaGeneral(${index})" class="btn-del" style="background:#ff5252; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">x</button>
                             </td>
-                        </tr>
-                    `;
-
+                        </tr>`;
                     fact.detalles_materiales.forEach(m => {
-                        if (!acumuladoMateriales[m.material]) {
-                            acumuladoMateriales[m.material] = { kilos: 0, costo: 0 };
-                        }
-                        acumuladoMateriales[m.material].kilos += m.kilos;
-                        acumuladoMateriales[m.material].costo += (parseFloat(m.total_pago) || 0);
+                        if (!acumuladoMateriales[m.material]) acumuladoMateriales[m.material] = { kilos: 0, costo: 0 };
+                        acumuladoMateriales[m.material].kilos += m.kilos; acumuladoMateriales[m.material].costo += (parseFloat(m.total_pago) || 0);
                     });
                 });
             }
-
             document.getElementById('totalFacturasTxt').innerText = totalAcumuladoComprasDia.toLocaleString('es-CR');
             document.getElementById('pagoMat').value = "₡" + totalAcumuladoComprasDia.toLocaleString('es-CR');
-
-            calcularCajaDinamica();
-            renderizarTablaAcumuladosDia(acumuladoMateriales);
+            calcularCajaDinamica(); renderizarTablaAcumuladosDia(acumuladoMateriales);
         }
 
         window.eliminarFacturaGeneral = (index) => {
@@ -669,359 +517,54 @@
             actualizarTablaGeneralDia();
         };
 
-        // =======================================================
-        // 🖨️ FUNCIÓN DE IMPRESIÓN
-        // =======================================================
         window.imprimirFactura = (index) => {
-            const fact = facturasDelDia[index];
-            if (!fact) return;
-
-            const normalizar = (texto) => {
-                if (typeof texto !== 'string') texto = String(texto);
-                return texto
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/₡/g, 'CRC');
-            };
-
+            const fact = facturasDelDia[index]; if (!fact) return;
+            const norm = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/₡/g, 'CRC');
             const fecha = document.getElementById('fecha').value || new Date().toLocaleDateString('es-CR');
+            const datosSuc = datosSucursales[sucursalActual] || { nombre: sucursalActual };
             
-            const datosSuc = datosSucursales[sucursalActual] || {
-                nombre: sucursalActual,
-                encargado: "",
-                cedula: "",
-                direccion: "",
-                telefono: "",
-                correo: ""
-            };
+            let linesSuc = []; if (datosSuc.nombre) linesSuc.push(norm(datosSuc.nombre)); if (datosSuc.encargado) linesSuc.push(norm(datosSuc.encargado)); if (datosSuc.cedula) linesSuc.push("Ced.: " + norm(datosSuc.cedula)); if (datosSuc.direccion) linesSuc.push("Dir.: " + norm(datosSuc.direccion)); if (datosSuc.telefono) linesSuc.push("Tel.: " + norm(datosSuc.telefono)); if (datosSuc.correo) linesSuc.push("Correo: " + norm(datosSuc.correo));
+            let matsHtml = ''; fact.detalles_materiales.forEach(m => matsHtml += `<div style="font-family: 'Courier New', monospace; white-space: pre;">${norm(m.material).padEnd(20, ' ')} ${m.kilos.toFixed(1).padStart(8, ' ')} ${m.precio_unitario.toLocaleString('es-CR').padStart(8, ' ')} ${m.total_pago.toLocaleString('es-CR').padStart(10, ' ')}</div>`);
+            const firmas = Array(7).fill('-').map(() => `<div>-</div>`).join('');
 
-            let linesSuc = [];
-            if (datosSuc.nombre) linesSuc.push(normalizar(datosSuc.nombre));
-            if (datosSuc.encargado) linesSuc.push(normalizar(datosSuc.encargado));
-            if (datosSuc.cedula) linesSuc.push("Ced.: " + normalizar(datosSuc.cedula));
-            if (datosSuc.direccion) linesSuc.push("Dir.: " + normalizar(datosSuc.direccion));
-            if (datosSuc.telefono) linesSuc.push("Tel.: " + normalizar(datosSuc.telefono));
-            if (datosSuc.correo) linesSuc.push("Correo: " + normalizar(datosSuc.correo));
-            const sucHtml = linesSuc.map(line => `<div>${line}</div>`).join('');
-
-            let materialesHtml = '';
-            fact.detalles_materiales.forEach(m => {
-                const nombre = normalizar(m.material).padEnd(20, ' ');
-                const kilos = m.kilos.toFixed(1).padStart(8, ' ');
-                const precio = m.precio_unitario.toLocaleString('es-CR').padStart(8, ' ');
-                const total = m.total_pago.toLocaleString('es-CR').padStart(10, ' ');
-                materialesHtml += `<div style="font-family: 'Courier New', monospace; white-space: pre;">${nombre} ${kilos} ${precio} ${total}</div>`;
-            });
-
-            const firmaGuiones = Array(7).fill('-').map(() => `<div>-</div>`).join('');
-
-            const contenido = `
-                <html>
-                <head>
-                    <title>Factura #${fact.num_factura}</title>
-                    <style>
-                        * { margin: 0; padding: 0; box-sizing: border-box; }
-                        body {
-                            font-family: 'Courier New', Courier, monospace;
-                            font-size: 13px;
-                            line-height: 1.5;
-                            max-width: 80mm;
-                            margin: 0 auto;
-                            padding: 3mm 4mm 25mm 4mm;
-                            background: white;
-                            color: black;
-                        }
-                        .header { margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px; }
-                        .header div { text-align: left; }
-                        .header .factura-titulo { font-size: 16px; font-weight: bold; }
-                        .info { margin: 8px 0; }
-                        .info div { margin: 2px 0; }
-                        .materiales { margin: 8px 0; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 4px 0; }
-                        .materiales .cabecera { font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 4px; }
-                        .total { font-size: 15px; font-weight: bold; margin-top: 6px; text-align: left; }
-                        .firma { margin-top: 16px; padding-top: 8px; border-top: 1px dashed #000; }
-                        .firma .label { font-weight: bold; font-size: 13px; }
-                        .firma .guiones { margin-top: 4px; font-size: 13px; line-height: 1.8; }
-                        .firma .guiones div { margin: 0; }
-                        .firma .acepto { font-size: 12px; color: #555; margin-top: 4px; }
-                        .footer { margin-top: 10px; font-size: 12px; text-align: left; border-top: 1px solid #000; padding-top: 4px; }
-                        .extra-papel { height: 30px; background: transparent; border: none; }
-                        @media print {
-                            .header { border-bottom: 1px solid #000 !important; }
-                            .materiales { border-top: 1px solid #000 !important; border-bottom: 1px solid #000 !important; }
-                            .materiales .cabecera { border-bottom: 1px solid #000 !important; }
-                            .total { border-top: none; }
-                            .firma { border-top: 1px dashed #000 !important; }
-                            .footer { border-top: 1px solid #000 !important; }
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <div>${sucHtml}</div>
-                        <div class="factura-titulo">${normalizar('FACTURA #' + fact.num_factura + (fact.serie ? ' ('+fact.serie+')' : ''))}</div>
-                    </div>
-
-                    <div class="info">
-                        <div><strong>${normalizar('Fecha:')}</strong> ${normalizar(fecha)}</div>
-                        <div><strong>${normalizar('Cliente:')}</strong> ${normalizar(fact.nombre)}</div>
-                        <div><strong>${normalizar('Cedula:')}</strong> ${normalizar(fact.cedula)}</div>
-                    </div>
-
-                    <div class="materiales">
-                        <div class="cabecera">${normalizar('Material               Kg    CRC/Kg     Total')}</div>
-                        ${materialesHtml}
-                    </div>
-
-                    <div class="total">${normalizar('Total: CRC ' + fact.total_factura.toLocaleString('es-CR'))}</div>
-
-                    <div class="firma">
-                        <div class="label">${normalizar('Firma del Cliente')}</div>
-                        <div class="guiones">${firmaGuiones}</div>
-                        <div class="acepto">${normalizar('(Acepto el contenido de esta factura)')}</div>
-                    </div>
-
-                    <div class="footer">${normalizar('Gracias por su visita')}</div>
-                    <div class="extra-papel"></div>
-                </body>
-                </html>
-            `;
+            const contenido = `<html><head><title>Factura #${fact.num_factura}</title><style>* { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5; max-width: 80mm; margin: 0 auto; padding: 3mm 4mm 25mm 4mm; background: white; color: black; } .header { margin-bottom: 6px; border-bottom: 1px solid #000; padding-bottom: 4px; } .factura-titulo { font-size: 16px; font-weight: bold; } .info { margin: 8px 0; } .materiales { margin: 8px 0; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 4px 0; } .cabecera { font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 4px; } .total { font-size: 15px; font-weight: bold; margin-top: 6px; } .firma { margin-top: 16px; padding-top: 8px; border-top: 1px dashed #000; } .footer { margin-top: 10px; font-size: 12px; border-top: 1px solid #000; padding-top: 4px; }</style></head><body><div class="header"><div>${linesSuc.map(l => `<div>${l}</div>`).join('')}</div><div class="factura-titulo">${norm('FACTURA #' + fact.num_factura + (fact.serie ? ' ('+fact.serie+')' : ''))}</div></div><div class="info"><div><strong>${norm('Fecha:')}</strong> ${norm(fecha)}</div><div><strong>${norm('Cliente:')}</strong> ${norm(fact.nombre)}</div><div><strong>${norm('Cedula:')}</strong> ${norm(fact.cedula)}</div></div><div class="materiales"><div class="cabecera">${norm('Material               Kg    CRC/Kg     Total')}</div>${matsHtml}</div><div class="total">${norm('Total: CRC ' + fact.total_factura.toLocaleString('es-CR'))}</div><div class="firma"><div class="label">${norm('Firma del Cliente')}</div><div class="guiones">${firmas}</div><div class="acepto">${norm('(Acepto el contenido de esta factura)')}</div></div><div class="footer">${norm('Gracias por su visita')}</div></body></html>`;
 
             const ventana = window.open('', '_blank', 'width=800,height=600');
-            if (ventana) {
-                ventana.document.write(contenido);
-                ventana.document.close();
-                ventana.focus();
-                setTimeout(() => ventana.print(), 600);
-            } else {
-                alert('Por favor, permita ventanas emergentes para imprimir.');
-            }
+            if (ventana) { ventana.document.write(contenido); ventana.document.close(); ventana.focus(); setTimeout(() => ventana.print(), 600); }
+            else alert('Por favor, permita ventanas emergentes para imprimir.');
         };
 
-        // =======================================================
-        // 📂 CARGAR CIERRE DE OTRO DÍA PARA EDITARLO
-        // =======================================================
-        window.abrirModalCargarCierre = async function() {
-            document.getElementById('modal-cargar-cierre').style.display = 'block';
-            await cargarListaCierres();
-        };
-
-        window.cerrarModalCargarCierre = function() {
-            document.getElementById('modal-cargar-cierre').style.display = 'none';
-        };
-
-        async function cargarListaCierres() {
-            const tbody = document.getElementById('body-lista-cierres-modal');
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#999; padding:15px;">Cargando cierres...</td></tr>`;
-
-            try {
-                const q = query(
-                    collection(db, "revisiones_faltantes"),
-                    where("sucursal", "==", sucursalActual),
-                    orderBy("timestamp", "desc")
-                );
-                const snap = await getDocs(q);
-
-                if (snap.empty) {
-                    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#999; padding:15px;">No hay cierres registrados.</td></tr>`;
-                    return;
-                }
-
-                tbody.innerHTML = "";
-                snap.forEach((docSnap) => {
-                    const d = docSnap.data();
-                    const id = docSnap.id;
-                    const fmt = (n) => "₡" + (parseFloat(n) || 0).toLocaleString('es-CR');
-
-                    tbody.innerHTML += `
-                        <tr>
-                            <td><b>${d.fecha || 'Sin fecha'}</b></td>
-                            <td>${fmt(d.caja_inicio)}</td>
-                            <td>${fmt(d.total_ventas)}</td>
-                            <td>${fmt(d.pago_materiales)}</td>
-                            <td>${fmt(d.gastos_facturas)}</td>
-                            <td><b>${fmt(d.cierre_mano)}</b></td>
-                            <td><span style="color:#d97706; font-weight:bold;">${d.estado || 'Pendiente'}</span></td>
-                            <td>
-                                <button onclick="cargarCierreEnPantalla('${id}')"
-                                    style="background:#d97706; color:white; border:none; border-radius:4px; padding:6px 10px; cursor:pointer; font-size:12px; min-height:auto;">
-                                    📥 Cargar
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
-            } catch (e) {
-                console.error("Error cargando cierres:", e);
-                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#dc2626; padding:15px;">Error: ${e.message}</td></tr>`;
-            }
-        }
-
-        window.cargarCierreEnPantalla = async function(cierreId) {
-            if (!confirm("⚠️ Se reemplazarán los datos actuales con los del cierre seleccionado.\n\n¿Desea continuar?")) return;
-
-            try {
-                const cierreSnap = await getDoc(doc(db, "revisiones_faltantes", cierreId));
-                if (!cierreSnap.exists()) { alert("No se encontró el cierre."); return; }
-                const cierreData = cierreSnap.data();
-
-                // Cargar facturas asociadas
-                const facturasQuery = query(collection(db, "facturas_compras"), where("cierre_id", "==", cierreId));
-                const facturasSnap = await getDocs(facturasQuery);
-                const facturasCargadas = [];
-                facturasSnap.forEach((fDoc) => {
-                    const f = fDoc.data();
-                    facturasCargadas.push({
-                        num_factura: f.num_factura,
-                        serie: f.serie || '',
-                        cedula: f.cedula,
-                        nombre: f.nombre,
-                        detalles_materiales: f.detalles_materiales || [],
-                        total_factura: f.total_factura
-                    });
-                });
-
-                // Cargar en memoria
-                facturasDelDia = facturasCargadas;
-                listaGastosDia = Array.isArray(cierreData.detalles_gastos) ? [...cierreData.detalles_gastos] : [];
-                listaDepositosDia = Array.isArray(cierreData.detalles_depositos) ? [...cierreData.detalles_depositos] : [];
-                cierreCargadoParaEditar = { id: cierreId, fecha: cierreData.fecha || 'Sin fecha' };
-
-                // Cargar en campos
-                document.getElementById('fecha').value = cierreData.fecha || '';
-                document.getElementById('cajaInicioBase').value = (parseFloat(cierreData.caja_inicio) || 0).toLocaleString('es-CR');
-                document.getElementById('ventas').value = (parseFloat(cierreData.total_ventas) || 0).toLocaleString('es-CR');
-
-                // Persistir en localStorage
-                localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
-                localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
-                localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
-                localStorage.setItem(`cajaInicioBase_${sucursalActual}`, document.getElementById('cajaInicioBase').value);
-                localStorage.setItem(`ventas_${sucursalActual}`, document.getElementById('ventas').value);
-                localStorage.setItem(`editando_cierre_${sucursalActual}`, JSON.stringify(cierreCargadoParaEditar));
-
-                // Refrescar UI
-                actualizarTablaGeneralDia();
-                actualizarTablaGastos();
-                actualizarTablaDepositos();
-                mostrarBannerEdicion();
-                cerrarModalCargarCierre();
-
-                alert(`✅ Cierre del ${cierreCargadoParaEditar.fecha} cargado.\n\nPuede modificar facturas, gastos o depósitos. Al presionar "ENVIAR CIERRE", se guardará como un nuevo cierre corregido.`);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-
-            } catch (e) {
-                console.error("Error al cargar cierre:", e);
-                alert("Error: " + e.message);
-            }
-        };
-
-        function mostrarBannerEdicion() {
-            let banner = document.getElementById('banner-modo-edicion');
-            if (banner) banner.remove();
-
-            if (!cierreCargadoParaEditar) return;
-
-            banner = document.createElement('div');
-            banner.id = 'banner-modo-edicion';
-            banner.style.cssText = `
-                background: #fef3c7; border: 2px solid #d97706; color: #92400e;
-                padding: 12px 16px; border-radius: 10px; margin-bottom: 15px;
-                font-weight: bold; display: flex; justify-content: space-between;
-                align-items: center; gap: 10px; flex-wrap: wrap;
-            `;
-            banner.innerHTML = `
-                <span>✏️ MODO CORRECCIÓN: Editando cierre del <b>${cierreCargadoParaEditar.fecha}</b>. Al enviar, se creará un nuevo cierre con los datos corregidos (el original se mantiene).</span>
-                <button onclick="cancelarEdicionCierre()"
-                    style="background:#dc2626; color:white; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; min-height:auto;">
-                    ✖ Cancelar
-                </button>
-            `;
-
-            const card = document.querySelector('.card');
-            card.insertBefore(banner, card.firstChild);
-        }
-
-        window.cancelarEdicionCierre = function() {
-            if (!confirm("Se descartarán los cambios y se recargará la página. ¿Continuar?")) return;
-            cierreCargadoParaEditar = null;
-            localStorage.removeItem(`editando_cierre_${sucursalActual}`);
-            localStorage.removeItem(`facturas_${sucursalActual}`);
-            localStorage.removeItem(`gastos_${sucursalActual}`);
-            localStorage.removeItem(`depositos_${sucursalActual}`);
-            localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
-            localStorage.removeItem(`ventas_${sucursalActual}`);
-            location.reload();
-        };
-
-        // =======================================================
-        // ENVIAR CIERRE (NUEVO O CORRECCIÓN)
-        // =======================================================
         window.enviarTodoFirebase = async function() {
-            if (facturasDelDia.length === 0) {
-                alert("❌ No hay facturas registradas para cerrar.");
-                return;
-            }
-
+            if (facturasDelDia.length === 0) return alert("❌ No hay facturas registradas para cerrar.");
             const esCorreccion = !!cierreCargadoParaEditar;
-            const msg = esCorreccion
-                ? `⚠️ Está corrigiendo el cierre del ${cierreCargadoParaEditar.fecha}.\n\nSe guardará como un NUEVO cierre corregido. ¿Continuar?`
-                : "¿Desea enviar el cierre total y las facturas al sistema?";
+            const msg = esCorreccion ? `⚠️ Está corrigiendo el cierre del ${cierreCargadoParaEditar.fecha}.\n\nSe guardará como un NUEVO cierre corregido. ¿Continuar?` : "¿Desea enviar el cierre total y las facturas al sistema?";
             if (!confirm(msg)) return;
 
-            const btn = document.getElementById('btnEnviarTodo');
-            btn.disabled = true; btn.innerText = "Subiendo Datos...";
-
+            const btn = document.getElementById('btnEnviarTodo'); btn.disabled = true; btn.innerText = "Subiendo Datos...";
             const fecha = document.getElementById('fecha').value;
 
             try {
                 const batch = writeBatch(db);
-
                 const cierreRef = doc(collection(db, "revisiones_faltantes"));
                 const datosCierre = {
-                    uid_trabajador: uidTrabajador,
-                    sucursal: sucursalActual,
-                    fecha,
-                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
-                    total_ventas: obtenerNumeroLimpio('ventas'),
-                    total_depositos: obtenerTotalDepositos(),
-                    detalles_depositos: listaDepositosDia,
-                    pago_materiales: totalAcumuladoComprasDia,
-                    gastos_facturas: obtenerTotalGastos(),
-                    detalles_gastos: listaGastosDia,
-                    cierre_mano: obtenerNumeroLimpio('cierreMano'),
-                    estado: "Pendiente",
-                    timestamp: serverTimestamp()
+                    uid_trabajador: uidTrabajador, sucursal: sucursalActual, fecha,
+                    caja_inicio: obtenerNumeroLimpio('cajaInicioBase'), total_ventas: obtenerNumeroLimpio('ventas'),
+                    total_depositos: obtenerTotalDepositos(), detalles_depositos: listaDepositosDia,
+                    pago_materiales: totalAcumuladoComprasDia, gastos_facturas: obtenerTotalGastos(),
+                    detalles_gastos: listaGastosDia, cierre_mano: obtenerNumeroLimpio('cierreMano'),
+                    estado: "Pendiente", timestamp: serverTimestamp()
                 };
-
-                if (esCorreccion) {
-                    datosCierre.corrige_a = cierreCargadoParaEditar.id;
-                    datosCierre.fecha_original_corregida = cierreCargadoParaEditar.fecha;
-                }
-
+                if (esCorreccion) { datosCierre.corrige_a = cierreCargadoParaEditar.id; datosCierre.fecha_original_corregida = cierreCargadoParaEditar.fecha; }
                 batch.set(cierreRef, datosCierre);
 
-                facturasDelDia.forEach((factura) => {
+                facturasDelDia.forEach(factura => {
                     const factRef = doc(collection(db, "facturas_compras"));
-                    batch.set(factRef, {
-                        ...factura,
-                        cierre_id: cierreRef.id,
-                        sucursal: sucursalActual, fecha, uid_trabajador: uidTrabajador,
-                        timestamp: serverTimestamp()
-                    });
+                    batch.set(factRef, { ...factura, cierre_id: cierreRef.id, sucursal: sucursalActual, fecha, uid_trabajador: uidTrabajador, timestamp: serverTimestamp() });
                 });
 
                 await batch.commit();
-                
-                localStorage.removeItem(`facturas_${sucursalActual}`);
-                localStorage.removeItem(`gastos_${sucursalActual}`);
-                localStorage.removeItem(`depositos_${sucursalActual}`);
-                localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
-                localStorage.removeItem(`ventas_${sucursalActual}`);
-                localStorage.removeItem(`editando_cierre_${sucursalActual}`);
-
-                alert("✅ Cierre guardado con éxito.");
-                location.reload();
+                localStorage.clear(); // Limpia todo para el nuevo cierre
+                alert("✅ Cierre guardado con éxito."); location.reload();
             } catch (e) {
                 alert("Error: " + e.message);
                 btn.disabled = false; btn.innerText = "🚀 ENVIAR CIERRE Y FACTURAS DEL DÍA";
@@ -1033,54 +576,21 @@
             const monto = obtenerNumeroLimpio('montoMovimiento');
             const fechaMov = document.getElementById('fechaMovimiento').value;
             const motivo = document.getElementById('motivoMovimiento').value.trim();
-
-            if(!monto || monto <= 0 || !fechaMov) {
-                alert("⚠️ Por favor asigne una fecha y un monto válido.");
-                return;
-            }
-
-            const btn = document.getElementById('btnGuardarMov');
-            btn.disabled = true; btn.innerText = "Guardando...";
-
+            if(!monto || monto <= 0 || !fechaMov) return alert("⚠️ Asigne una fecha y un monto válido.");
+            const btn = document.getElementById('btnGuardarMov'); btn.disabled = true; btn.innerText = "Guardando...";
             try {
-                await addDoc(collection(db, "movimientos_cuenta"), {
-                    uid_trabajador: uidTrabajador,
-                    sucursal: sucursalActual,
-                    tipo: tipo,
-                    monto: monto,
-                    fecha_operacion: fechaMov,
-                    motivo: motivo || "Sin especificación",
-                    timestamp: serverTimestamp()
-                });
-
+                await addDoc(collection(db, "movimientos_cuenta"), { uid_trabajador: uidTrabajador, sucursal: sucursalActual, tipo, monto, fecha_operacion: fechaMov, motivo: motivo || "Sin especificación", timestamp: serverTimestamp() });
                 alert(`✅ ${tipo} registrado correctamente.`);
-                document.getElementById('montoMovimiento').value = "";
-                document.getElementById('motivoMovimiento').value = "";
-                await calcularDeudaTotal();
-            } catch (error) {
-                alert("Error: " + error.message);
-            } finally {
-                btn.disabled = false; btn.innerText = "Registrar en Cuenta Externa";
-            }
+                document.getElementById('montoMovimiento').value = ""; document.getElementById('motivoMovimiento').value = ""; await calcularDeudaTotal();
+            } catch (error) { alert("Error: " + error.message); }
+            finally { btn.disabled = false; btn.innerText = "Registrar en Cuenta Externa"; }
         };
 
         function renderizarTablaAcumuladosDia(acumulado) {
-            const tbody = document.getElementById('body-materiales-totales-dia');
-            tbody.innerHTML = "";
-
-            if (Object.keys(acumulado).length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">Sin movimientos en el día.</td></tr>`;
-                return;
-            }
-
-            for (const [material, datos] of Object.entries(acumulado)) {
-                tbody.innerHTML += `
-                    <tr>
-                        <td><b>${material}</b></td>
-                        <td style="color:#1a73e8; font-weight:bold;">${datos.kilos.toFixed(1)} kg</td>
-                        <td><b>₡${datos.costo.toLocaleString('es-CR')}</b></td>
-                    </tr>
-                `;
+            const tbody = document.getElementById('body-materiales-totales-dia'); tbody.innerHTML = "";
+            if (Object.keys(acumulado).length === 0) tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#999;">Sin movimientos en el día.</td></tr>`;
+            else for (const [material, datos] of Object.entries(acumulado)) {
+                tbody.innerHTML += `<tr><td><b>${material}</b></td><td style="color:#1a73e8; font-weight:bold;">${datos.kilos.toFixed(1)} kg</td><td><b>₡${datos.costo.toLocaleString('es-CR')}</b></td></tr>`;
             }
         }
     </script>
@@ -1115,33 +625,14 @@
         .scroll-precios { max-height: 300px; overflow-y: auto; margin-bottom: 12px; border-radius: 8px; }
         .box-ultimo-cierre { background: #edf2f7; border-left: 4px solid #3182ce; padding: 10px 14px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #2d3748; }
         .btn-print { background: #2b6cb0; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
-
-        .seq-box {
-            border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 10px 12px;
-            cursor: pointer;
-            flex: 1;
-            text-align: center;
-            transition: all 0.2s;
-            background: #f8fafc;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
+        .seq-box { border: 2px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; cursor: pointer; flex: 1; text-align: center; transition: all 0.2s; background: #f8fafc; display: flex; flex-direction: column; gap: 2px; }
         .seq-box:hover { background: #f1f5f9; }
         .seq-active { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 1px #2563eb; }
         .seq-inactive { opacity: 0.8; }
         .seq-num { font-size: 18px; font-weight: bold; color: #0f172a; }
         .seq-label { font-size: 11px; color: #64748b; }
         .seq-status { font-size: 12px; font-weight: 600; }
-
-        @media(max-width: 850px) {
-            .grid-layout { grid-template-columns: 1fr; gap: 16px; }
-            body { padding: 8px; }
-            .card, .panel-lateral { padding: 12px; border-radius: 12px; }
-            .seccion-interna { padding: 10px; border-radius: 10px; }
-        }
+        @media(max-width: 850px) { .grid-layout { grid-template-columns: 1fr; gap: 16px; } body { padding: 8px; } .card, .panel-lateral { padding: 12px; border-radius: 12px; } .seccion-interna { padding: 10px; border-radius: 10px; } }
     </style>
 </head>
 <body>
@@ -1166,7 +657,8 @@
 
             <div style="max-width: 100%; margin-bottom:15px;">
                 <label>Fecha de Operación</label>
-                <input type="date" id="fecha">
+                <!-- AQUI ESTÁ EL CAMBIO: onchange="alCambiarFecha()" -->
+                <input type="date" id="fecha" onchange="alCambiarFecha()">
             </div>
 
             <div class="seccion-interna" style="border: 1px solid #4299e1; background: #f0f8ff;">
@@ -1365,11 +857,8 @@
             </div>
 
             <button class="btn-work" onclick="mostrarUltimoCierre()" style="margin-bottom: 12px;">📋 Ver Último Cierre</button>
-            
-            <!-- BOTÓN AGREGADO PARA CARGAR CIERRE -->
-            <button class="btn-work" onclick="abrirModalCargarCierre()" style="margin-bottom: 12px; background:#d97706;">📂 Cargar Cierre de Otro Día</button>
 
-            <button class="btn-work" onclick="toggleSeccionPrecios()">⚙️ Configurar Precios Materiales</button>
+            <button class="btn-work" onclick="toggleSeccionPrecios()" style="background:#6b46c1; margin-bottom: 12px;">⚙️ Configurar Precios Materiales</button>
 
             <div id="seccion-editar-precios" class="seccion-interna" style="display:none; margin-top:10px;">
                 <h5>Modificar Precio</h5>
@@ -1413,39 +902,6 @@
             </div>
         </div>
 
-    </div>
-
-    <!-- MODAL PARA CARGAR CIERRE DE OTRO DÍA -->
-    <div id="modal-cargar-cierre" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; overflow-y:auto; padding:20px; box-sizing:border-box;">
-        <div style="background:white; max-width:1100px; margin:20px auto; border-radius:16px; padding:20px; position:relative;">
-            <button onclick="cerrarModalCargarCierre()" 
-                style="position:absolute; top:10px; right:10px; background:#ff5252; color:white; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; min-height:auto;">✖ Cerrar</button>
-            <h3 style="color:#d97706; margin-top:0;">📂 Cargar Cierre de Otro Día</h3>
-            <p style="font-size:13px; color:#666;">
-                Seleccione un cierre anterior. Se cargarán sus facturas, gastos y depósitos en la pantalla principal para que pueda modificarlos.
-                <b>Al presionar "ENVIAR CIERRE", se creará un nuevo cierre corregido (el original se mantiene).</b>
-            </p>
-
-            <div style="max-height:450px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; margin-top:10px;">
-                <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                    <thead>
-                        <tr>
-                            <th>Fecha</th>
-                            <th>Caja Inicio</th>
-                            <th>Ventas</th>
-                            <th>Compras</th>
-                            <th>Gastos</th>
-                            <th>Cierre Mano</th>
-                            <th>Estado</th>
-                            <th>Acción</th>
-                        </tr>
-                    </thead>
-                    <tbody id="body-lista-cierres-modal">
-                        <tr><td colspan="8" style="text-align:center; color:#999; padding:15px;">Cargando cierres...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
     </div>
 
 </body>
