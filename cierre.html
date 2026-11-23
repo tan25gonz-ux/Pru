@@ -42,6 +42,9 @@
         const ID_SECUNDARIA = '1144';
         let temporizadorFirestore = null;
 
+        // Marca cuando estamos editando un cierre cargado de otro día
+        let cierreCargadoParaEditar = null; // { id, fecha }
+
         // ---------- DATOS DE CADA SUCURSAL ----------
         const datosSucursales = {
             "Paraiso": {
@@ -98,6 +101,15 @@
 
                 document.getElementById('cajaInicioBase').value = localStorage.getItem(`cajaInicioBase_${sucursalActual}`) || "";
                 document.getElementById('ventas').value = localStorage.getItem(`ventas_${sucursalActual}`) || "";
+
+                // Recuperar marca de edición si se recargó la página
+                const editGuardado = localStorage.getItem(`editando_cierre_${sucursalActual}`);
+                if (editGuardado) {
+                    try {
+                        cierreCargadoParaEditar = JSON.parse(editGuardado);
+                        mostrarBannerEdicion();
+                    } catch(e) { cierreCargadoParaEditar = null; }
+                }
 
                 await cargarPreciosDesdeFirebase();
                 await calcularDeudaTotal();
@@ -196,7 +208,6 @@
             }
         }
 
-        // Función para redirigir a la página de último cierre
         window.mostrarUltimoCierre = function() {
             window.location.href = 'ultimocierre.html';
         };
@@ -659,7 +670,7 @@
         };
 
         // =======================================================
-        // 🖨️ FUNCIÓN DE IMPRESIÓN - SIN TILDES Y SIN SÍMBOLO ₡ (USA CRC)
+        // 🖨️ FUNCIÓN DE IMPRESIÓN
         // =======================================================
         window.imprimirFactura = (index) => {
             const fact = facturasDelDia[index];
@@ -725,19 +736,10 @@
                             border-bottom: 1px solid #000;
                             padding-bottom: 4px;
                         }
-                        .header div {
-                            text-align: left;
-                        }
-                        .header .factura-titulo {
-                            font-size: 16px;
-                            font-weight: bold;
-                        }
-                        .info {
-                            margin: 8px 0;
-                        }
-                        .info div {
-                            margin: 2px 0;
-                        }
+                        .header div { text-align: left; }
+                        .header .factura-titulo { font-size: 16px; font-weight: bold; }
+                        .info { margin: 8px 0; }
+                        .info div { margin: 2px 0; }
                         .materiales {
                             margin: 8px 0;
                             border-top: 1px solid #000;
@@ -750,34 +752,16 @@
                             padding-bottom: 2px;
                             margin-bottom: 4px;
                         }
-                        .total {
-                            font-size: 15px;
-                            font-weight: bold;
-                            margin-top: 6px;
-                            text-align: left;
-                        }
+                        .total { font-size: 15px; font-weight: bold; margin-top: 6px; text-align: left; }
                         .firma {
                             margin-top: 16px;
                             padding-top: 8px;
                             border-top: 1px dashed #000;
                         }
-                        .firma .label {
-                            font-weight: bold;
-                            font-size: 13px;
-                        }
-                        .firma .guiones {
-                            margin-top: 4px;
-                            font-size: 13px;
-                            line-height: 1.8;
-                        }
-                        .firma .guiones div {
-                            margin: 0;
-                        }
-                        .firma .acepto {
-                            font-size: 12px;
-                            color: #555;
-                            margin-top: 4px;
-                        }
+                        .firma .label { font-weight: bold; font-size: 13px; }
+                        .firma .guiones { margin-top: 4px; font-size: 13px; line-height: 1.8; }
+                        .firma .guiones div { margin: 0; }
+                        .firma .acepto { font-size: 12px; color: #555; margin-top: 4px; }
                         .footer {
                             margin-top: 10px;
                             font-size: 12px;
@@ -785,11 +769,7 @@
                             border-top: 1px solid #000;
                             padding-top: 4px;
                         }
-                        .extra-papel {
-                            height: 30px;
-                            background: transparent;
-                            border: none;
-                        }
+                        .extra-papel { height: 30px; background: transparent; border: none; }
                         @media print {
                             .header { border-bottom: 1px solid #000 !important; }
                             .materiales { border-top: 1px solid #000 !important; border-bottom: 1px solid #000 !important; }
@@ -821,9 +801,7 @@
 
                     <div class="firma">
                         <div class="label">${normalizar('Firma del Cliente')}</div>
-                        <div class="guiones">
-                            ${firmaGuiones}
-                        </div>
+                        <div class="guiones">${firmaGuiones}</div>
                         <div class="acepto">${normalizar('(Acepto el contenido de esta factura)')}</div>
                     </div>
 
@@ -844,12 +822,176 @@
             }
         };
 
+        // =======================================================
+        // 📂 CARGAR CIERRE DE OTRO DÍA PARA EDITARLO
+        // =======================================================
+        window.abrirModalCargarCierre = async function() {
+            document.getElementById('modal-cargar-cierre').style.display = 'block';
+            await cargarListaCierres();
+        };
+
+        window.cerrarModalCargarCierre = function() {
+            document.getElementById('modal-cargar-cierre').style.display = 'none';
+        };
+
+        async function cargarListaCierres() {
+            const tbody = document.getElementById('body-lista-cierres-modal');
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#999; padding:15px;">Cargando cierres...</td></tr>`;
+
+            try {
+                const q = query(
+                    collection(db, "revisiones_faltantes"),
+                    where("sucursal", "==", sucursalActual),
+                    orderBy("timestamp", "desc")
+                );
+                const snap = await getDocs(q);
+
+                if (snap.empty) {
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#999; padding:15px;">No hay cierres registrados.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = "";
+                snap.forEach((docSnap) => {
+                    const d = docSnap.data();
+                    const id = docSnap.id;
+                    const fmt = (n) => "₡" + (parseFloat(n) || 0).toLocaleString('es-CR');
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td><b>${d.fecha || 'Sin fecha'}</b></td>
+                            <td>${fmt(d.caja_inicio)}</td>
+                            <td>${fmt(d.total_ventas)}</td>
+                            <td>${fmt(d.pago_materiales)}</td>
+                            <td>${fmt(d.gastos_facturas)}</td>
+                            <td><b>${fmt(d.cierre_mano)}</b></td>
+                            <td><span style="color:#d97706; font-weight:bold;">${d.estado || 'Pendiente'}</span></td>
+                            <td>
+                                <button onclick="cargarCierreEnPantalla('${id}')"
+                                    style="background:#d97706; color:white; border:none; border-radius:4px; padding:6px 10px; cursor:pointer; font-size:12px; min-height:auto;">
+                                    📥 Cargar
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (e) {
+                console.error("Error cargando cierres:", e);
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#dc2626; padding:15px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        window.cargarCierreEnPantalla = async function(cierreId) {
+            if (!confirm("⚠️ Se reemplazarán los datos actuales con los del cierre seleccionado.\n\n¿Desea continuar?")) return;
+
+            try {
+                const cierreSnap = await getDoc(doc(db, "revisiones_faltantes", cierreId));
+                if (!cierreSnap.exists()) { alert("No se encontró el cierre."); return; }
+                const cierreData = cierreSnap.data();
+
+                // Cargar facturas asociadas
+                const facturasQuery = query(collection(db, "facturas_compras"), where("cierre_id", "==", cierreId));
+                const facturasSnap = await getDocs(facturasQuery);
+                const facturasCargadas = [];
+                facturasSnap.forEach((fDoc) => {
+                    const f = fDoc.data();
+                    facturasCargadas.push({
+                        num_factura: f.num_factura,
+                        serie: f.serie || '',
+                        cedula: f.cedula,
+                        nombre: f.nombre,
+                        detalles_materiales: f.detalles_materiales || [],
+                        total_factura: f.total_factura
+                    });
+                });
+
+                // Cargar en memoria
+                facturasDelDia = facturasCargadas;
+                listaGastosDia = Array.isArray(cierreData.detalles_gastos) ? [...cierreData.detalles_gastos] : [];
+                listaDepositosDia = Array.isArray(cierreData.detalles_depositos) ? [...cierreData.detalles_depositos] : [];
+                cierreCargadoParaEditar = { id: cierreId, fecha: cierreData.fecha || 'Sin fecha' };
+
+                // Cargar en campos
+                document.getElementById('fecha').value = cierreData.fecha || '';
+                document.getElementById('cajaInicioBase').value = (parseFloat(cierreData.caja_inicio) || 0).toLocaleString('es-CR');
+                document.getElementById('ventas').value = (parseFloat(cierreData.total_ventas) || 0).toLocaleString('es-CR');
+
+                // Persistir en localStorage
+                localStorage.setItem(`facturas_${sucursalActual}`, JSON.stringify(facturasDelDia));
+                localStorage.setItem(`gastos_${sucursalActual}`, JSON.stringify(listaGastosDia));
+                localStorage.setItem(`depositos_${sucursalActual}`, JSON.stringify(listaDepositosDia));
+                localStorage.setItem(`cajaInicioBase_${sucursalActual}`, document.getElementById('cajaInicioBase').value);
+                localStorage.setItem(`ventas_${sucursalActual}`, document.getElementById('ventas').value);
+                localStorage.setItem(`editando_cierre_${sucursalActual}`, JSON.stringify(cierreCargadoParaEditar));
+
+                // Refrescar UI
+                actualizarTablaGeneralDia();
+                actualizarTablaGastos();
+                actualizarTablaDepositos();
+                mostrarBannerEdicion();
+                cerrarModalCargarCierre();
+
+                alert(`✅ Cierre del ${cierreCargadoParaEditar.fecha} cargado.\n\nPuede modificar facturas, gastos o depósitos. Al presionar "ENVIAR CIERRE", se guardará como un nuevo cierre corregido.`);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+
+            } catch (e) {
+                console.error("Error al cargar cierre:", e);
+                alert("Error: " + e.message);
+            }
+        };
+
+        function mostrarBannerEdicion() {
+            let banner = document.getElementById('banner-modo-edicion');
+            if (banner) banner.remove();
+
+            if (!cierreCargadoParaEditar) return;
+
+            banner = document.createElement('div');
+            banner.id = 'banner-modo-edicion';
+            banner.style.cssText = `
+                background: #fef3c7; border: 2px solid #d97706; color: #92400e;
+                padding: 12px 16px; border-radius: 10px; margin-bottom: 15px;
+                font-weight: bold; display: flex; justify-content: space-between;
+                align-items: center; gap: 10px; flex-wrap: wrap;
+            `;
+            banner.innerHTML = `
+                <span>✏️ MODO CORRECCIÓN: Editando cierre del <b>${cierreCargadoParaEditar.fecha}</b>. Al enviar, se creará un nuevo cierre con los datos corregidos (el original se mantiene).</span>
+                <button onclick="cancelarEdicionCierre()"
+                    style="background:#dc2626; color:white; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; min-height:auto;">
+                    ✖ Cancelar
+                </button>
+            `;
+
+            const card = document.querySelector('.card');
+            card.insertBefore(banner, card.firstChild);
+        }
+
+        window.cancelarEdicionCierre = function() {
+            if (!confirm("Se descartarán los cambios y se recargará la página. ¿Continuar?")) return;
+            cierreCargadoParaEditar = null;
+            localStorage.removeItem(`editando_cierre_${sucursalActual}`);
+            localStorage.removeItem(`facturas_${sucursalActual}`);
+            localStorage.removeItem(`gastos_${sucursalActual}`);
+            localStorage.removeItem(`depositos_${sucursalActual}`);
+            localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
+            localStorage.removeItem(`ventas_${sucursalActual}`);
+            location.reload();
+        };
+
+        // =======================================================
+        // ENVIAR CIERRE
+        // =======================================================
         window.enviarTodoFirebase = async function() {
             if (facturasDelDia.length === 0) {
-                alert("❌ No hay facturas registradas hoy para cerrar.");
+                alert("❌ No hay facturas registradas para cerrar.");
                 return;
             }
-            if(!confirm("¿Desea enviar el cierre total y las facturas al sistema?")) return;
+
+            const esCorreccion = !!cierreCargadoParaEditar;
+            const msg = esCorreccion
+                ? `⚠️ Está corrigiendo el cierre del ${cierreCargadoParaEditar.fecha}.\n\nSe guardará como un NUEVO cierre corregido. ¿Continuar?`
+                : "¿Desea enviar el cierre total y las facturas al sistema?";
+            if (!confirm(msg)) return;
 
             const btn = document.getElementById('btnEnviarTodo');
             btn.disabled = true; btn.innerText = "Subiendo Datos...";
@@ -860,8 +1002,10 @@
                 const batch = writeBatch(db);
 
                 const cierreRef = doc(collection(db, "revisiones_faltantes"));
-                batch.set(cierreRef, {
-                    uid_trabajador: uidTrabajador, sucursal: sucursalActual, fecha,
+                const datosCierre = {
+                    uid_trabajador: uidTrabajador,
+                    sucursal: sucursalActual,
+                    fecha,
                     caja_inicio: obtenerNumeroLimpio('cajaInicioBase'),
                     total_ventas: obtenerNumeroLimpio('ventas'),
                     total_depositos: obtenerTotalDepositos(),
@@ -870,8 +1014,16 @@
                     gastos_facturas: obtenerTotalGastos(),
                     detalles_gastos: listaGastosDia,
                     cierre_mano: obtenerNumeroLimpio('cierreMano'),
-                    estado: "Pendiente", timestamp: serverTimestamp()
-                });
+                    estado: "Pendiente",
+                    timestamp: serverTimestamp()
+                };
+
+                if (esCorreccion) {
+                    datosCierre.corrige_a = cierreCargadoParaEditar.id;
+                    datosCierre.fecha_original_corregida = cierreCargadoParaEditar.fecha;
+                }
+
+                batch.set(cierreRef, datosCierre);
 
                 facturasDelDia.forEach((factura) => {
                     const factRef = doc(collection(db, "facturas_compras"));
@@ -890,6 +1042,7 @@
                 localStorage.removeItem(`depositos_${sucursalActual}`);
                 localStorage.removeItem(`cajaInicioBase_${sucursalActual}`);
                 localStorage.removeItem(`ventas_${sucursalActual}`);
+                localStorage.removeItem(`editando_cierre_${sucursalActual}`);
 
                 alert("✅ Cierre guardado con éxito.");
                 location.reload();
@@ -1001,14 +1154,8 @@
             gap: 2px;
         }
         .seq-box:hover { background: #f1f5f9; }
-        .seq-active {
-            border-color: #2563eb;
-            background: #eff6ff;
-            box-shadow: 0 0 0 1px #2563eb;
-        }
-        .seq-inactive {
-            opacity: 0.8;
-        }
+        .seq-active { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 1px #2563eb; }
+        .seq-inactive { opacity: 0.8; }
         .seq-num { font-size: 18px; font-weight: bold; color: #0f172a; }
         .seq-label { font-size: 11px; color: #64748b; }
         .seq-status { font-size: 12px; font-weight: 600; }
@@ -1241,8 +1388,9 @@
                 ₡<span id="deudaTotalTxt">0</span>
             </div>
 
-            <!-- Botón para ver último cierre (redirige a ultimocierre.html) -->
             <button class="btn-work" onclick="mostrarUltimoCierre()" style="margin-bottom: 12px;">📋 Ver Último Cierre</button>
+
+            <button class="btn-work" onclick="abrirModalCargarCierre()" style="margin-bottom: 12px; background:#d97706;">📂 Cargar Cierre de Otro Día</button>
 
             <button class="btn-work" onclick="toggleSeccionPrecios()">⚙️ Configurar Precios Materiales</button>
 
@@ -1288,6 +1436,39 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- MODAL PARA CARGAR CIERRE DE OTRO DÍA -->
+    <div id="modal-cargar-cierre" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; overflow-y:auto; padding:20px; box-sizing:border-box;">
+        <div style="background:white; max-width:1100px; margin:20px auto; border-radius:16px; padding:20px; position:relative;">
+            <button onclick="cerrarModalCargarCierre()" 
+                style="position:absolute; top:10px; right:10px; background:#ff5252; color:white; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:bold; min-height:auto;">✖ Cerrar</button>
+            <h3 style="color:#d97706; margin-top:0;">📂 Cargar Cierre de Otro Día</h3>
+            <p style="font-size:13px; color:#666;">
+                Seleccione un cierre anterior. Se cargarán sus facturas, gastos y depósitos en la pantalla principal para que pueda modificarlos.
+                <b>Al presionar "ENVIAR CIERRE", se creará un nuevo cierre corregido (el original se mantiene).</b>
+            </p>
+
+            <div style="max-height:450px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; margin-top:10px;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Caja Inicio</th>
+                            <th>Ventas</th>
+                            <th>Compras</th>
+                            <th>Gastos</th>
+                            <th>Cierre Mano</th>
+                            <th>Estado</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="body-lista-cierres-modal">
+                        <tr><td colspan="8" style="text-align:center; color:#999; padding:15px;">Cargando cierres...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
 </body>
